@@ -13,15 +13,17 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 # pydevd.settrace('localhost', port=51234, stdoutToServer=True, stderrToServer=True)
 
 # sampling time
-AUDIO_DURATION = 4000
+AUDIO_DURATION = 2000
 # The number of time steps input to the model from the spectrogram
-Tx = 398
+Tx = 198
 # Number of frequencies input to the model at each time step of the spectrogram
 n_freq = 26
 # The number of time steps in the output of our model
-Ty = 388
-# duration of activation time
-ACTIVE_DURATION = 50
+Ty = 188
+# interval
+KEYWORD_INTERVAL_MIN = 50
+KEYWORD_INTERVAL_MAX = 500
+ACTIVE_AUDIO_OFFSET = 100
 # dataset ratio
 TRAIN_RATIO = 0.95
 VALIDATE_RATIO = 0.05
@@ -200,16 +202,16 @@ def load_raw_audio(feature_type='mfcc'):
         for filename in os.listdir(audio_dir_path + keyword):
             if not filename.endswith("wav"):
                 continue
-            file_path = audio_dir_path + keyword + "/" + filename
+            file_path = os.path.join(audio_dir_path, keyword, filename)
             audio = AudioSegment.from_wav(file_path)
             keywords[keyword].append(KeywordAudioData(audio, keyword, filename))
             # get features
             features_list.append(create_features(file_path, feature_type))
     # background
-    for filename in os.listdir(audio_dir_path + "_background_noise_/"):
+    for filename in os.listdir(os.path.join(audio_dir_path, "_background_noise_")):
         if not filename.endswith("wav"):
             continue
-        file_path = audio_dir_path + "_background_noise_/" + filename
+        file_path = os.path.join(audio_dir_path, "_background_noise_", filename)
         audio = AudioSegment.from_wav(file_path)
         backgrounds.append({'audio': audio, 'filename': filename})
         # get features
@@ -242,7 +244,7 @@ def get_random_time_segment(segment_ms):
     segment_time -- a tuple of (segment_start, segment_end) in ms
     """
     # Make sure segment doesn't run past the AUDIO_DURATION sec background
-    segment_start = np.random.randint(low=0, high=AUDIO_DURATION-segment_ms)
+    segment_start = np.random.randint(low=0, high=AUDIO_DURATION - segment_ms)
     segment_end = segment_start + segment_ms - 1
 
     return segment_start, segment_end
@@ -266,127 +268,138 @@ def get_random_time_segment_bg(background):
     return segment_start, segment_end
 
 
-def is_overlapping(segment_time, previous_segments):
+def calc_slide_size(segment_time, previous_segment):
     """
-    Checks if the time of a segment overlaps with the times of existing segments.
+    calculate slide width if the time of a segment overlaps with the times of existing segments.
 
     Arguments:
     segment_time -- a tuple of (segment_start, segment_end) for the new segment
-    previous_segments -- a list of tuples of (segment_start, segment_end) for the existing segments
+    previous_segment -- tuple of (segment_start, segment_end) for the existing segment
 
     Returns:
     True if the time segment overlaps with any of the existing segments, False otherwise
     """
+    if not previous_segment:
+        return 0
 
     segment_start, segment_end = segment_time
-
-    ### START CODE HERE ### (≈ 4 line)
-    # Step 1: Initialize overlap as a "False" flag. (≈ 1 line)
-    overlap = False
-
+    slide_size = np.random.choice(list(range(KEYWORD_INTERVAL_MIN, KEYWORD_INTERVAL_MAX)))
+    # print(f"slidesize:{slide_size}")
     # Step 2: loop over the previous_segments start and end times.
     # Compare start/end times and set the flag to True if there is an overlap (≈ 3 lines)
-    for previous_start, previous_end in previous_segments:
-        if previous_start <= segment_start <= previous_end + ACTIVE_DURATION or \
-                previous_start <= segment_end <= previous_end + ACTIVE_DURATION:
-            overlap = True
-    ### END CODE HERE ###
-
-    return overlap
-
-
-def insert_audio_clip(background, audio_clip, previous_segments):
-    """
-    Insert a new audio segment over the background noise at a random time step, ensuring that the
-    audio segment does not overlap with existing segments.
-
-    Arguments:
-    background -- a 10 second background audio recording.
-    audio_clip -- the audio clip to be inserted/overlaid.
-    previous_segments -- times where audio segments have already been placed
-
-    Returns:
-    new_background -- the updated background audio
-    """
-
-    # Get the duration of the audio clip in ms
-    segment_ms = len(audio_clip)
-
-    # Step 1: Use one of the helper functions to pick a random time segment onto which to insert
-    # the new audio clip. (≈ 1 line)
-    segment_time = get_random_time_segment(segment_ms)
-
-    # Step 2: Check if the new segment_time overlaps with one of the previous_segments. If so, keep
-    # picking new segment_time at random until it doesn't overlap. (≈ 2 lines)
-    while is_overlapping(segment_time, previous_segments):
-        segment_time = get_random_time_segment(segment_ms)
-
-    # Step 3: Add the new segment_time to the list of previous_segments (≈ 1 line)
-    previous_segments.append(segment_time)
-
-    # Step 4: Superpose audio segment and background
-    new_background = background.overlay(audio_clip, position=segment_time[0])
-
-    return new_background, segment_time
+    previous_start, previous_end = previous_segment
+    if previous_start - ACTIVE_AUDIO_OFFSET <= segment_start <= previous_end + ACTIVE_AUDIO_OFFSET:
+        # overlaid, add offset
+        return previous_end + slide_size - segment_start
+    elif previous_start - ACTIVE_AUDIO_OFFSET<= segment_end <= previous_end + ACTIVE_AUDIO_OFFSET:
+        # overlaid, subtract offset
+        return segment_end - previous_start - slide_size
+    else:
+        # not overlay
+        return 0
 
 
-def insert_ones_after_word(y, segment_end_ms, value):
-    """
-    Update the label vector y. The labels of the 50 output steps strictly after the end of the segment
-    should be set to 1. By strictly we mean that the label of segment_end_y should be 0 while, the
-    50 followinf labels should be ones.
-
-
-    Arguments:
-    y -- numpy array of shape (1, Ty), the labels of the training example
-    segment_end_ms -- the end time of the segment in ms
-    value -- word's id
-
-    Returns:
-    y -- updated labels
-    """
-
-    # duration of the background (in terms of spectrogram time-steps)
-    segment_end_y = int(segment_end_ms * Ty / float(AUDIO_DURATION))
-    # print(f"insert_ones segment_end_ms:{segment_end_ms} Ty:{Ty} segment_end_y:{segment_end_y} value:{value}")
-    # Add one-hot encoded value to the correct index in the background label (y)
-    for i in range(segment_end_y + 1, segment_end_y + ACTIVE_DURATION + 1):
-        if i < Ty:
-            y[i] = value
-    # print(f"insert_ones y.shape:{y.shape} y:{y[701:]}")
-    return y
-
-
-def insert_ones(y: np.ndarray, segment_start_ms: int, segment_end_ms: int, audio: KeywordAudioData):
+def insert_ones(y: np.ndarray, segment_start_ms: int, audio: KeywordAudioData):
     """
     Update the label vector y during segment.
 
     Arguments:
     y -- numpy array of shape (1, Ty), the labels of the training example
     segment_start_ms -- the start time of the segment in ms
-    segment_end_ms -- the end time of the segment in ms
-    value -- word's id
+    audio -- target keyword audio
+    truncated -- whether the keyword is truncated
 
     Returns:
     y -- updated labels
     """
+    # default keyword index
+    value = audio.value
 
-    # duration of the background (in terms of spectrogram time-steps)
     segment_start_y = int((segment_start_ms + audio.start_ms) * Ty / float(AUDIO_DURATION))
+    if segment_start_y < 0:
+        # truncate exceeding range
+        segment_start_y = 0
+        # consider truncated word as invalid
+        value = UNKNOWN_KEYWORD_IDX
+        # print("set unknown idx")
     segment_end_y = int((segment_start_ms + audio.end_ms) * Ty / float(AUDIO_DURATION))
+    if segment_end_y > Ty:
+        # truncate exceeding range
+        segment_end_y = Ty
+        # consider truncated word as invalid
+        value = UNKNOWN_KEYWORD_IDX
+        # print("set unknown idx")
+
     # print(f"keyword:{audio.keyword} file:{audio.filename} start:{audio.start_ms} end:{audio.end_ms} segstart:{segment_start_ms} segend:{segment_end_ms} segstart_y:{segment_start_y} segend_y:{segment_end_y}")
     # print(f"insert_ones segment_end_ms:{segment_end_ms} Ty:{Ty} segment_end_y:{segment_end_y} value:{value}")
     # Add one-hot encoded value to the correct index in the background label (y)
-    for i in range(segment_start_y, segment_end_y + 1):
-        y[i] = audio.value
+    for i in range(segment_start_y, segment_end_y):
+        y[i] = value
     # print(f"insert_ones y.shape:{y.shape} y:{y[701:]}")
     return y
 
 
+def insert_audio_clip(tmp_audio: AudioSegment, y: np.ndarray,
+                      keyword_audio: KeywordAudioData, previous_segment: tuple):
+    """
+    Insert a new audio segment over the background noise at a random time step, ensuring that the
+    audio segment does not overlap with existing segments.
+
+    Arguments:
+    tmp_audio -- a 10 second background audio recording.
+    audio_clip -- the audio clip to be inserted/overlaid.
+    previous_segment -- time where audio segment haa already been placed
+
+    Returns:
+    new_background -- the updated background audio
+    """
+
+    # Get the duration of the audio clip in ms
+    keyword_duration = len(keyword_audio.audio)
+    background_duration = len(tmp_audio)
+
+    # Use one of the helper functions to pick a random time segment onto which to insert
+    # the new audio clip. (≈ 1 line)
+    segment_time = get_random_time_segment(keyword_duration)
+    segment_start_ms, segment_end_ms = segment_time
+    # print(f"duration:{keyword_duration} segment:{segment_time}")
+
+    # Check if the new segment_time overlaps with one of the previous_segments. If so, keep
+    # picking new segment_time at random until it doesn't overlap. (≈ 2 lines)
+    slide_size = calc_slide_size(segment_time, previous_segment)
+    segment_time = (segment_start_ms + slide_size, segment_end_ms + slide_size)
+    segment_start_ms, segment_end_ms = segment_time
+    # print(f"slide_size:{slide_size} segment:{segment_time}")
+    if segment_start_ms >= background_duration or segment_end_ms <= 0:
+        # invalid range. skip insert.
+        return tmp_audio, y, segment_time
+
+    # set y value
+    y = insert_ones(y, segment_time[0], keyword_audio)
+
+    # Superpose audio segment and background
+    overlaid_audio = keyword_audio.audio
+    if segment_start_ms < 0:
+        # truncate exceeded part
+        overlaid_audio = overlaid_audio[-segment_start_ms:]
+        segment_start_ms = 0
+        segment_time = 0, segment_end_ms
+    if segment_end_ms > background_duration:
+        # truncate exceeded part
+        # print(f"end:{segment_end_ms - background_duration}")
+        end_of_keyword = keyword_duration - (segment_end_ms - background_duration)
+        overlaid_audio = overlaid_audio[:end_of_keyword]
+        segment_time = segment_start_ms, background_duration
+    # overlaid_audio.export(f"overlaied_{keyword_audio.keyword}.wav", format="wav")
+    tmp_audio = tmp_audio.overlay(overlaid_audio, position=segment_start_ms)
+    return tmp_audio, y, segment_time
+
+
 def create_training_sample(background: AudioSegment, raw_data: RawData,
-                           filename: str = 'sample.wav',
                            feature_type: str = 'mfcc',
-                           is_train: bool = True):
+                           is_train: bool = True,
+                           filename: str = 'sample.wav',
+                           remove_tmpfile = True):
     """
     Creates a training example with a given background, activates, and negatives.
 
@@ -400,18 +413,17 @@ def create_training_sample(background: AudioSegment, raw_data: RawData,
     """
 
     # Make background quieter
-    output = background - 40
-
-    # Step 1: Initialize y (label vector) of zeros (≈ 1 line)
+    tmp_audio = background - 40
+    # Initialize y (label vector) of zeros
     y = np.zeros((Ty, 1))
-    # print(f"y:{y} {y.shape}")
-    # Step 2: Initialize segment times as empty list (≈ 1 line)
-    previous_segments = []
+    # Initialize segment times as empty list
+    previous_segment = None
 
-    # Select 0-4 random "activate" audio clips from the entire list of "activates" recordings
+    # Select 0-2 random "activate" audio clips from the entire list of "activates" recordings
     # number_of_keywords = np.random.randint(0, 5)
     # number_of_keywords = np.random.choice([0, 1, 1, 2, 2, 3, 3, 3, 4, 4])
-    number_of_keywords = np.random.choice([0, 1, 1, 1, 2, 2, 2])
+    # 0: 10%, 1: 50%, 2: 40%
+    number_of_keywords = np.random.choice([0, 1, 1, 1, 1, 1, 2, 2, 2, 2])
     random_keywords = []
     for i in range(number_of_keywords):
         if np.random.rand() < KNOWN_KEYWORD_RATIO:
@@ -423,7 +435,7 @@ def create_training_sample(background: AudioSegment, raw_data: RawData,
         random_keywords.append((keyword, raw_data.keywords[keyword]))
 
     # print(f"num:{number_of_keywords}")
-    # Step 3: Loop over randomly selected "activate" clips and insert in background
+    # Loop over randomly selected "activate" clips and insert in background
     for keyword, random_keyword_list in random_keywords:
         # print(f"idx:{idx}")
         sample_num = len(random_keyword_list)
@@ -434,29 +446,24 @@ def create_training_sample(background: AudioSegment, raw_data: RawData,
             validate_num = int(sample_num * VALIDATE_RATIO)
             random_index = train_num + np.random.randint(validate_num)
         keyword_audio = random_keyword_list[random_index]
-        audio_data = keyword_audio.audio
-        audio_filename = keyword_audio.filename
 
         # Insert the audio clip on the background
-        output, segment_time = insert_audio_clip(output, audio_data, previous_segments)
-        # Retrieve segment_start and segment_end from segment_time
-        segment_start, segment_end = segment_time
-        # Insert labels in "y" with increment
-        print(f"keyword:{keyword} start:{segment_start} end:{segment_end} audio_file:{audio_filename}")
+        tmp_audio, y, previous_segment = insert_audio_clip(tmp_audio, y, keyword_audio, previous_segment)
+        # print(f"keyword:{keyword} range:{previous_segment} audio_file:{keyword_audio.filename} audio_range:{(keyword_audio.start_ms, keyword_audio.end_ms)}")
         # print(f"create_training_sample1 y:{y[701:]}")
-        y = insert_ones(y, segment_start, segment_end, keyword_audio)
-        # print(f"create_training_sample2 y:{y[701:]}")
         # Standardize the volume of the audio clip
-        output = match_target_amplitude(output, -20.0)
+        tmp_audio = match_target_amplitude(tmp_audio, -20.0)
 
     # Export new training example
-    file_handle = output.export(filename, format="wav")
+    file_handle = tmp_audio.export(filename, format="wav")
+    os.fsync(file_handle.fileno())
     # print(f"File ({filename}) was saved in your directory.")
 
     # Get features of the new recording (background with superposition of positive and negatives)
     x = create_features(filename, feature_type)
     x = normalize(np.array(x), raw_data.mean, raw_data.std)
-    # print(f"y:{y}")
+    if remove_tmpfile:
+        os.remove(filename)
     return x, y
 
 
@@ -483,12 +490,12 @@ def create_dataset(raw: RawData, num: int, is_train=True):
     train_dataset_y = []
     for i in range(num):
         # extract background
-        background = raw.backgrounds[np.random.randint(len(raw.backgrounds))]
+        bg_idx = np.random.randint(len(raw.backgrounds))
+        background = raw.backgrounds[bg_idx]
         background_audio_data = background['audio']
         bg_segment = get_random_time_segment_bg(background_audio_data)
         clipped_background = background_audio_data[bg_segment[0]:bg_segment[1]]
-
-        x, y = create_training_sample(clipped_background, raw, is_train=is_train)
+        x, y = create_training_sample(clipped_background, raw, is_train=is_train, remove_tmpfile=False)
         train_dataset_x.append(x)
         train_dataset_y.append(y)
         # print(f"create_dataset y:{y[700:]}")
@@ -515,6 +522,7 @@ KNOWN_KEYWORDS = {
     'on': 5,
     'yes': 6,
     'no': 7,
+    'sheila': 8,
 #    'go': 8,
 #    'stop': 9,
 #    'right': 8,
@@ -537,7 +545,6 @@ KNOWN_KEYWORDS = {
 #    'happy': 27,
 #    'house': 28,
 #    'marvin': 29,
-#    'sheila': 30,
 #    'wow': 31,
 }
 

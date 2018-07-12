@@ -3,6 +3,8 @@
 import numpy as np
 from td_utils import *
 
+import string
+import random
 import pickle
 
 from keras.models import Model
@@ -195,12 +197,15 @@ def next_dataset(raw_data: RawData, batch_size: int, is_train: bool = True):
         train_dataset_y = []
         for i in range(batch_size):
             # extract background
-            background = raw_data.backgrounds[np.random.randint(len(raw_data.backgrounds))]
+            bg_idx = np.random.randint(len(raw_data.backgrounds))
+            background = raw_data.backgrounds[bg_idx]
             background_audio_data = background['audio']
             bg_segment = get_random_time_segment_bg(background_audio_data)
             clipped_background = background_audio_data[bg_segment[0]:bg_segment[1]]
-
-            x, y = create_training_sample(clipped_background, raw_data, is_train=is_train)
+            tmp_filename = f"sample_{''.join(random.choices(string.ascii_uppercase + string.digits, k=20))}.wav"
+            x, y = create_training_sample(clipped_background, raw_data,
+                                          filename=tmp_filename, is_train=is_train)
+            # x, y = create_training_sample(clipped_background, raw_data, is_train=is_train)
             train_dataset_x.append(x)
             train_dataset_y.append(y)
 
@@ -210,8 +215,8 @@ def next_dataset(raw_data: RawData, batch_size: int, is_train: bool = True):
 
 def train_model(model: Model, raw_data: RawData, model_filename,
                 batch_size=100,
-                num_train_examples=10000,
-                num_valid_samples=500,
+                num_train_examples=50000,
+                num_valid_samples=2500,
                 epochs=20):
     callbacks = create_callbacks(model_filename)
     steps_per_epoch = num_train_examples//batch_size
@@ -225,7 +230,7 @@ def train_model(model: Model, raw_data: RawData, model_filename,
                         callbacks=callbacks, verbose=True)
 
 
-def build_model(model_filename, learning_rate=0.001, create_model=create_model_dilation_1):
+def build_model(model_filename, learning_rate=0.001, create_model=create_model_dilation):
     model = create_model(input_shape=(Tx, n_freq))
     if os.path.exists(model_filename):
         print(f"load weights: file={model_filename}")
@@ -236,9 +241,8 @@ def build_model(model_filename, learning_rate=0.001, create_model=create_model_d
     return model
 
 
-def build_and_train(raw_data, model_filename, create_model=create_model_dilation_1):
+def build_and_train(raw_data, model_filename, create_model=create_model_dilation):
     model = build_model(model_filename, learning_rate=0.001, create_model=create_model)
     train_model(model, raw_data, model_filename,
                 num_train_examples=10000,
                 num_valid_samples=500)
-
