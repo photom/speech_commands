@@ -6,8 +6,8 @@ KNOWN_KEYWORDS = {
 #    'unknown': 1,  # others
     'up': 2,
     'down': 3,
-    'off': 4,
     'on': 5,
+    'off': 4,
     'yes': 6,
     'no': 7,
     'sheila': 8,

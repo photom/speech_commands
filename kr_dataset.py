@@ -145,11 +145,22 @@ def plot_mfcc_feature(vis_mfcc_feature):
 
 
 # Calculate mfcc for a wav audio file
-def create_mfcc(wav_file):
+def create_mfcc_from_file(wav_file):
     samplerate, data = get_wav_info(wav_file)
+    return create_mfcc(samplerate, data, wav_file)
+
+
+# Calculate mfcc for a wav audio file
+def create_mfcc_from_io(wav_obj, filename='nofile'):
+    samplerate, data = get_wav_info(wav_obj)
+    return create_mfcc(samplerate, data, filename)
+
+
+# Calculate mfcc for a wav audio file
+def create_mfcc(samplerate, data, filename='nofile'):
     mfcc_dim = n_freq
     nchannels = data.ndim
-
+    print(f"channel:{nchannels} data:{data.shape}")
     if nchannels == 1:
         features = mfcc(data, samplerate=samplerate, numcep=mfcc_dim,
                         winlen=WINDOW_SIZE_SAMPLE, winstep=WINDOW_STRIDE_SAMPLES)
@@ -157,7 +168,8 @@ def create_mfcc(wav_file):
         features = mfcc(data[:, 0], samplerate=samplerate, numcep=mfcc_dim,
                         winlen=WINDOW_SIZE_SAMPLE, winstep=WINDOW_STRIDE_SAMPLES)
     else:
-        raise RuntimeError(f"invalid channels. file={wav_file}")
+        raise RuntimeError(f"invalid channels. file={filename}")
+    print(f"create_mfcc: rate:{samplerate} data:{data.shape} features:{features.shape}")
     return features
 
 
@@ -175,7 +187,7 @@ def match_target_amplitude(sound, target_dBFS):
 
 def create_features(filename, feature_type):
     if feature_type == 'mfcc':
-        x = create_mfcc(filename)
+        x = create_mfcc_from_file(filename)
     else:
         x = create_spectrogram(filename)
     return x
