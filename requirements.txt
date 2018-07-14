@@ -1,0 +1,8 @@
+Requests=2.19.1
+SpeechRecognition=3.8.1
+Keras=2.2.0
+Matplotlib=2.0.0
+SciPy=0.19.1
+python-speech-features=0.5
+pydub=0.22.0
+numpy=1.13.3
