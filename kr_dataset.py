@@ -1,13 +1,15 @@
+import os
+import pickle
+
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
-import os
 from pydub import AudioSegment
-import pandas as pd
 import numpy as np
-import pickle
 from scipy.signal import spectrogram
 from python_speech_features import mfcc
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+import kr_keyword
 
 # import pydevd
 # pydevd.settrace('localhost', port=51234, stdoutToServer=True, stderrToServer=True)
@@ -43,16 +45,16 @@ class RawData:
 
     @staticmethod
     def get_known_keywords():
-        return list(KNOWN_KEYWORDS.keys())
+        return list(kr_keyword.KNOWN_KEYWORDS.keys())
 
     def get_unknown_keywords(self):
-        return list(set(self.keywords.keys()) - set(KNOWN_KEYWORDS.keys()))
+        return list(set(self.keywords.keys()) - set(kr_keyword.KNOWN_KEYWORDS.keys()))
 
 
 class KeywordAudioData:
-    def __init__(self, audio: AudioSegment, keyword: str, filename: str):
+    def __init__(self, audio: AudioSegment, word: str, filename: str):
         self.audio = audio
-        self.keyword = keyword
+        self.keyword = word
         self.filename = filename
         self.value = self.get_keyword_index()
         self.start_ms, self.end_ms = self.get_active_range()
@@ -69,7 +71,7 @@ class KeywordAudioData:
             if self.audio[i:i+1].dBFS >= threshold:
                 values.append(self.value)
             else:
-                values.append(SILENCE_KEYWORD_IDX)
+                values.append(kr_keyword.SILENCE_KEYWORD_IDX)
         # print(self.keyword)
         # for i in range(len(self.audio)):
         #    print(f"{i}: {values[i]}")
@@ -86,13 +88,13 @@ class KeywordAudioData:
         return first_idx, last_idx
 
     def get_keyword_index(self):
-        if self.keyword in KNOWN_KEYWORDS:
+        if self.keyword in kr_keyword.KNOWN_KEYWORDS:
             # target word
             # decrement index offset
-            return KNOWN_KEYWORDS[self.keyword]
+            return kr_keyword.KNOWN_KEYWORDS[self.keyword]
         else:
             # unknown
-            return UNKNOWN_KEYWORD_IDX
+            return kr_keyword.UNKNOWN_KEYWORD_IDX
 
 
 # Calculate and plot spectrogram for a wav audio file
@@ -320,14 +322,14 @@ def insert_ones(y: np.ndarray, segment_start_ms: int, audio: KeywordAudioData):
         # truncate exceeding range
         segment_start_y = 0
         # consider truncated word as invalid
-        value = UNKNOWN_KEYWORD_IDX
+        value = kr_keyword.UNKNOWN_KEYWORD_IDX
         # print("set unknown idx")
     segment_end_y = int((segment_start_ms + audio.end_ms) * Ty / float(AUDIO_DURATION))
     if segment_end_y > Ty:
         # truncate exceeding range
         segment_end_y = Ty
         # consider truncated word as invalid
-        value = UNKNOWN_KEYWORD_IDX
+        value = kr_keyword.UNKNOWN_KEYWORD_IDX
         # print("set unknown idx")
 
     # print(f"keyword:{audio.keyword} file:{audio.filename} start:{audio.start_ms} end:{audio.end_ms} segstart:{segment_start_ms} segend:{segment_end_ms} segstart_y:{segment_start_y} segend_y:{segment_end_y}")
@@ -423,7 +425,8 @@ def create_training_sample(background: AudioSegment, raw_data: RawData,
     # number_of_keywords = np.random.randint(0, 5)
     # number_of_keywords = np.random.choice([0, 1, 1, 2, 2, 3, 3, 3, 4, 4])
     # 0: 10%, 1: 50%, 2: 40%
-    number_of_keywords = np.random.choice([0, 1, 1, 1, 1, 1, 2, 2, 2, 2])
+    # number_of_keywords = np.random.choice([0, 1, 1, 1, 1, 1, 2, 2, 2, 2])
+    number_of_keywords = np.random.choice([0, 1, 1, 1, 1, 1, 1])
     random_keywords = []
     for i in range(number_of_keywords):
         if np.random.rand() < KNOWN_KEYWORD_RATIO:
@@ -511,56 +514,3 @@ def load_dataset(filename):
         # have to specify it.
         train_dataset = pickle.load(f)
     return train_dataset
-
-
-KNOWN_KEYWORDS = {
-#    'silence': 0,
-#    'unknown': 1,  # others
-    'up': 2,
-    'down': 3,
-    'off': 4,
-    'on': 5,
-    'yes': 6,
-    'no': 7,
-    'sheila': 8,
-#    'go': 8,
-#    'stop': 9,
-#    'right': 8,
-#    'left': 10,
-#    'tree': 12,
-#    'zero': 13,
-#    'one': 14,
-#    'two': 15,
-#    'three': 16,
-#    'four': 17,
-#    'five': 18,
-#    'six': 19,
-#    'seven': 20,
-#    'eight': 21,
-#    'nine': 22,
-#    'bed': 23,
-#    'bird': 24,
-#    'cat': 25,
-#    'dog': 26,
-#    'happy': 27,
-#    'house': 28,
-#    'marvin': 29,
-#    'wow': 31,
-}
-
-# KEYWORDS (exclude silence)
-NUM_CLASSES = len(KNOWN_KEYWORDS) + 2
-# one-hot-encoding (exclude silence)
-KEYWORDS_INDEX_DF = pd.get_dummies(list(range(NUM_CLASSES)))
-SILENCE_KEYWORD_IDX = 0
-UNKNOWN_KEYWORD_IDX = 1
-
-
-def get_keyword_index(keyword):
-    if keyword in KNOWN_KEYWORDS:
-        # target word
-        # decrement index offset
-        return KNOWN_KEYWORDS[keyword]
-    else:
-        # unknown
-        return UNKNOWN_KEYWORD_IDX
