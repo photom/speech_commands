@@ -28,7 +28,8 @@ PHRASE_TIME_LIMIT = 2
 MODEL_WEIGHT_PATH = 'model/kmn_dilation2.weights.best.hdf5'
 
 THREAD_NUM = 1
-SHARED_MEM_DIR = f"/dev/shm/keyword_recognizer_{''.join(random.choices(string.ascii_uppercase + string.digits, k=10))}"
+# SHARED_MEM_DIR = f"/dev/shm/keyword_recognizer_{''.join(random.choices(string.ascii_uppercase + string.digits, k=10))}"
+SHARED_MEM_DIR = "/var/tmp/keyword_recognizer"
 
 PROFILE = 'profile'
 INPUT_WAV = 'input.wav'
@@ -102,6 +103,7 @@ def predict_word(audio_data: AudioData, model_map: ModelMap):
         # io_obj = BytesIO(audio_data.get_wav_data())
         # x = create_mfcc_from_io(io_obj)
         x = create_mfcc_from_file(NOISERED_WAV_PATH)
+        # x = create_mfcc_from_file(INPUT_WAV_PATH)
 
         # complement shortage space
         print(f"x:{x.shape},{x.dtype} framedata:{len(audio_data.frame_data)}")
@@ -117,6 +119,9 @@ def predict_word(audio_data: AudioData, model_map: ModelMap):
             print(f"min_val:{min_val.shape} emptysp:{empty_space.shape}")
             x = np.concatenate((x, empty_space), axis=0)
         # frames = np.array(data)
+        if x.shape[0] > Tx:
+            eprint(f"trim input. from={x.shape[0]} to={Tx}")
+            x = x[:Tx]
         x = np.float32(np.array([x]))
         print(f"x:{x.shape},{x.dtype}")
 
@@ -136,8 +141,9 @@ def callback(_: Recognizer, audio_data: AudioData, model_map: ModelMap, pool: Po
 
 
 def listen_background():
-    background_listener = Recognizer()
+    background_listener = noisered.BackgroundListener()
     with Microphone() as source:
+        background_listener.adjust_for_ambient_noise(source)
         while os.path.exists(SHARED_MEM_DIR):
             audio_data = background_listener.record(source, duration=3)
             try:
@@ -178,12 +184,13 @@ def main():
         recognizer.listen_in_background(source, callback_with_model, PHRASE_TIME_LIMIT)
         while True:
             time.sleep(1)
-        pool.terminate()
+        # pool.terminate()
 
 
 if __name__ == '__main__':
     try:
-        initialize_shared_mem_dir()
+        # initialize_shared_mem_dir()
         main()
     finally:
-        remove_shared_mem_dir()
+        pass
+        # remove_shared_mem_dir()
