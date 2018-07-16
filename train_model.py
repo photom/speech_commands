@@ -23,7 +23,8 @@ def load_dataset(filename):
     return train_dataset
 
 
-def next_dataset(raw_data: RawData, batch_size: int, is_train: bool = True):
+def next_dataset(raw_data: RawData, batch_size: int,
+                 is_train: bool = True, feature_type=FEATURE_TYPE):
     """ Obtain a batch of training data
     """
     while True:
@@ -38,7 +39,8 @@ def next_dataset(raw_data: RawData, batch_size: int, is_train: bool = True):
             clipped_background = background_audio_data[bg_segment[0]:bg_segment[1]]
             tmp_filename = f"sample_{''.join(random.choices(string.ascii_uppercase + string.digits, k=20))}.wav"
             x, y = create_training_sample(clipped_background, raw_data,
-                                          filename=tmp_filename, is_train=is_train)
+                                          filename=tmp_filename, is_train=is_train,
+                                          feature_type=feature_type)
             # x, y = create_training_sample(clipped_background, raw_data, is_train=is_train)
             train_dataset_x.append(x)
             train_dataset_y.append(y)
@@ -48,6 +50,7 @@ def next_dataset(raw_data: RawData, batch_size: int, is_train: bool = True):
 
 
 def train_model(model: Model, raw_data: RawData, model_filename,
+                feature_type=FEATURE_TYPE,
                 batch_size=100,
                 num_train_examples=50000,
                 num_valid_samples=2500,
@@ -56,12 +59,12 @@ def train_model(model: Model, raw_data: RawData, model_filename,
     steps_per_epoch = num_train_examples//batch_size
     validation_steps = num_valid_samples//batch_size
     # model.fit(x, y, validation_split=0.3, batch_size=batch_size, epochs=10, callbacks=callbacks)
-    model.fit_generator(generator=next_dataset(raw_data, batch_size, is_train=True),
+    model.fit_generator(generator=next_dataset(raw_data, batch_size, is_train=True, feature_type=feature_type),
                         epochs=epochs,
-                        validation_data=next_dataset(raw_data, batch_size, is_train=False),
+                        validation_data=next_dataset(raw_data, batch_size, is_train=False, feature_type=feature_type),
                         steps_per_epoch=steps_per_epoch,
                         validation_steps=validation_steps,
-                        callbacks=callbacks, verbose=True)
+                        callbacks=callbacks, verbose=False)
 
 
 def build_and_train(raw_data, model_filename, create_model=create_model_dilation):

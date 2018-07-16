@@ -25,7 +25,7 @@ import noisered
 
 SAMPLE_RATE = 16000
 PHRASE_TIME_LIMIT = 2
-MODEL_WEIGHT_PATH = 'model/kmn_dilation2.weights.best.hdf5'
+MODEL_WEIGHT_PATH = 'model/kmn_dilation_lbfe.weights.best.hdf5'
 
 THREAD_NUM = 1
 # SHARED_MEM_DIR = f"/dev/shm/keyword_recognizer_{''.join(random.choices(string.ascii_uppercase + string.digits, k=10))}"
@@ -102,21 +102,21 @@ def predict_word(audio_data: AudioData, model_map: ModelMap):
         # create input from wav data
         # io_obj = BytesIO(audio_data.get_wav_data())
         # x = create_mfcc_from_io(io_obj)
-        x = create_mfcc_from_file(NOISERED_WAV_PATH)
+        x = create_features(NOISERED_WAV_PATH, FEATURE_TYPE)
         # x = create_mfcc_from_file(INPUT_WAV_PATH)
 
         # complement shortage space
         print(f"x:{x.shape},{x.dtype} framedata:{len(audio_data.frame_data)}")
         if x.shape[0] < Tx:
-            min_val = np.amin(x, axis=0)
-            print(f"min_val:{min_val.shape}")
+            # min_val = np.amin(x, axis=0)
+            # print(f"min_val:{min_val.shape}")
             # calc remaining space size
             empty_space_size = Tx - x.shape[0]
             # create remaining space
-            empty_space = np.tile(min_val, (empty_space_size, 1))
-            # empty_space = np.zeros((empty_space_size, n_freq), dtype=np.float32)
+            # empty_space = np.tile(min_val, (empty_space_size, 1))
+            empty_space = np.zeros((empty_space_size, n_freq), dtype=np.float32)
             # complement data's empty space
-            print(f"min_val:{min_val.shape} emptysp:{empty_space.shape}")
+            print(f"emptysp:{empty_space.shape}")
             x = np.concatenate((x, empty_space), axis=0)
         # frames = np.array(data)
         if x.shape[0] > Tx:
@@ -145,7 +145,10 @@ def listen_background():
     with Microphone() as source:
         background_listener.adjust_for_ambient_noise(source)
         while os.path.exists(SHARED_MEM_DIR):
-            audio_data = background_listener.record(source, duration=3)
+            audio_data = background_listener.listen(source, pause_time_limit=5)
+            if not audio_data:
+                time.sleep(1)
+                continue
             try:
                 os.remove(BG_WAV_PATH)
             except:
@@ -173,6 +176,8 @@ def main():
 
     # initialize recognizer
     recognizer = Recognizer()
+    recognizer.speaking_duration = 0.1
+    recognizer.phrase_threshold = 0.1
     with Microphone(sample_rate=SAMPLE_RATE) as source:
         # listen for 1 second to calibrate the energy threshold for ambient noise levels
         recognizer.adjust_for_ambient_noise(source)
@@ -183,7 +188,7 @@ def main():
         callback_with_model = partial(callback, model_map=ModelMap(), pool=pool)
         recognizer.listen_in_background(source, callback_with_model, PHRASE_TIME_LIMIT)
         while True:
-            time.sleep(1)
+            time.sleep(10)
         # pool.terminate()
 
 

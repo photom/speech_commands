@@ -7,6 +7,7 @@ from pydub import AudioSegment
 import numpy as np
 from scipy.signal import spectrogram
 from python_speech_features import mfcc
+from python_speech_features import logfbank
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import kr_keyword
@@ -33,6 +34,8 @@ WINDOW_SIZE_SAMPLE = 0.03
 WINDOW_STRIDE_SAMPLES = 0.01
 # How much of the training data should be known words.
 KNOWN_KEYWORD_RATIO = 0.75
+
+FEATURE_TYPE = 'lfbe'
 
 
 class RawData:
@@ -157,19 +160,42 @@ def create_mfcc_from_io(wav_obj, filename='nofile'):
 
 
 # Calculate mfcc for a wav audio file
-def create_mfcc(samplerate, data, filename='nofile'):
+def create_mfcc(sample_rate, data, filename='nofile'):
     mfcc_dim = n_freq
     nchannels = data.ndim
-    print(f"channel:{nchannels} data:{data.shape}")
+    # print(f"channel:{nchannels} data:{data.shape}")
     if nchannels == 1:
-        features = mfcc(data, samplerate=samplerate, numcep=mfcc_dim,
+        features = mfcc(data, samplerate=sample_rate, numcep=mfcc_dim, appendEnergy=True,
                         winlen=WINDOW_SIZE_SAMPLE, winstep=WINDOW_STRIDE_SAMPLES)
     elif nchannels == 2:
-        features = mfcc(data[:, 0], samplerate=samplerate, numcep=mfcc_dim,
+        features = mfcc(data[:, 0], samplerate=sample_rate, numcep=mfcc_dim, appendEnergy=True,
                         winlen=WINDOW_SIZE_SAMPLE, winstep=WINDOW_STRIDE_SAMPLES)
     else:
         raise RuntimeError(f"invalid channels. file={filename}")
-    print(f"create_mfcc: rate:{samplerate} data:{data.shape} features:{features.shape}")
+    # print(f"create_mfcc: rate:{sample_rate} data:{data.shape} features:{features.shape}")
+    return features
+
+
+# Calculate lfbe for a wav audio file
+def create_lfbe_from_file(wav_file):
+    sample_rate, data = get_wav_info(wav_file)
+    return create_lfbe(sample_rate, data, wav_file)
+
+
+# Calculate Log Mel Filter-Bank Energies for a wav audio file
+# https://arxiv.org/pdf/1705.02411.pdf
+def create_lfbe(sample_rate, data, filename='nofile'):
+    nchannels = data.ndim
+    # print(f"channel:{nchannels} data:{data.shape}")
+    if nchannels == 1:
+        features = logfbank(data, samplerate=sample_rate,
+                            winlen=WINDOW_SIZE_SAMPLE, winstep=WINDOW_STRIDE_SAMPLES)
+    elif nchannels == 2:
+        features = logfbank(data[:, 0], samplerate=sample_rate,
+                            winlen=WINDOW_SIZE_SAMPLE, winstep=WINDOW_STRIDE_SAMPLES)
+    else:
+        raise RuntimeError(f"invalid channels. file={filename}")
+    # print(f"create_mfcc: rate:{sample_rate} data:{data.shape} features:{features.shape}")
     return features
 
 
@@ -188,6 +214,8 @@ def match_target_amplitude(sound, target_dBFS):
 def create_features(filename, feature_type):
     if feature_type == 'mfcc':
         x = create_mfcc_from_file(filename)
+    elif feature_type == 'lfbe':
+        x = create_lfbe_from_file(filename)
     else:
         x = create_spectrogram(filename)
     return x
@@ -202,7 +230,7 @@ def get_statistics(features_list):
 
 
 # Load raw audio files for speech synthesis
-def load_raw_audio(feature_type='mfcc'):
+def load_raw_audio(feature_type):
     audio_dir_path = "./train/audio/"
     keywords = {}
     backgrounds = []
@@ -410,7 +438,7 @@ def insert_audio_clip(tmp_audio: AudioSegment, y: np.ndarray,
 
 
 def create_training_sample(background: AudioSegment, raw_data: RawData,
-                           feature_type: str = 'mfcc',
+                           feature_type: str = FEATURE_TYPE,
                            is_train: bool = True,
                            filename: str = 'sample.wav',
                            remove_tmpfile = True):
@@ -500,7 +528,8 @@ def normalize_dataset(features_list):
         features_list[i] = normalize(features, mean, std)
 
 
-def create_dataset(raw: RawData, num: int, is_train=True):
+def create_dataset(raw: RawData, num: int, is_train=True,
+                   feature_type: str = 'lfbe',):
     train_dataset_x = []
     train_dataset_y = []
     for i in range(num):
@@ -510,7 +539,9 @@ def create_dataset(raw: RawData, num: int, is_train=True):
         background_audio_data = background['audio']
         bg_segment = get_random_time_segment_bg(background_audio_data)
         clipped_background = background_audio_data[bg_segment[0]:bg_segment[1]]
-        x, y = create_training_sample(clipped_background, raw, is_train=is_train, remove_tmpfile=False)
+        x, y = create_training_sample(clipped_background, raw, is_train=is_train,
+                                      remove_tmpfile=False,
+                                      feature_type=feature_type)
         train_dataset_x.append(x)
         train_dataset_y.append(y)
         # print(f"create_dataset y:{y[700:]}")

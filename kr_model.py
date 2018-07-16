@@ -87,7 +87,8 @@ def create_model_dilation(input_shape, units=200, filters=200, kernel_size=11,
     Function creating the model's graph in Keras.
     Argument:
     input_shape -- shape of the model's input data (using Keras conventions)
-
+    kmn_dilation2.weights.best.hdf5: val_loss: 0.2173 - val_acc: 0.927
+    kmn_dilation3.weights.best.hdf5: val_loss: 0.1992 - val_acc: 0.934
     Returns:
     model -- Keras model instance
     """
