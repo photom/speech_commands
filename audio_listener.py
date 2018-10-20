@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import sys
 import time
 import random
@@ -12,7 +13,9 @@ from io import BytesIO
 import traceback
 from collections import Counter
 from timeit import default_timer as timer
+from typing import Union
 
+from pydub import AudioSegment
 import numpy as np
 from speech_recognition import Microphone
 from speech_recognition import Recognizer
@@ -31,12 +34,10 @@ THREAD_NUM = 1
 # SHARED_MEM_DIR = f"/dev/shm/keyword_recognizer_{''.join(random.choices(string.ascii_uppercase + string.digits, k=10))}"
 SHARED_MEM_DIR = "/var/tmp/keyword_recognizer"
 
-PROFILE = 'profile'
 INPUT_WAV = 'input.wav'
 NOISERED_WAV = 'noisered.wav'
 BG_WAV = 'bg_input.wav'
 
-PROFILE_PATH = os.path.join(SHARED_MEM_DIR, PROFILE)
 INPUT_WAV_PATH = os.path.join(SHARED_MEM_DIR, INPUT_WAV)
 NOISERED_WAV_PATH = os.path.join(SHARED_MEM_DIR, NOISERED_WAV)
 BG_WAV_PATH = os.path.join(SHARED_MEM_DIR, BG_WAV)
@@ -80,8 +81,8 @@ def summarize_prediction(predicted):
 
 def predict_word(audio_data: AudioData, model_map: ModelMap):
     try:
-        if not os.path.exists(PROFILE_PATH):
-            print("noise profile is not ready.")
+        if not os.path.exists(BG_WAV_PATH):
+            print("bg audio is not ready.")
             return
         try:
             os.remove(INPUT_WAV_PATH)
@@ -91,7 +92,7 @@ def predict_word(audio_data: AudioData, model_map: ModelMap):
         # execute noise reduction
         with open(INPUT_WAV_PATH, 'wb') as f:
             f.write(audio_data.get_wav_data())
-        noisered.create_noisered_wav(INPUT_WAV_PATH, NOISERED_WAV_PATH, PROFILE_PATH)
+        noisered.create_noisered_wav(INPUT_WAV_PATH, NOISERED_WAV_PATH, BG_WAV_PATH)
 
         # load or get model
         if threading.get_ident() not in model_map.models:
@@ -140,25 +141,58 @@ def callback(_: Recognizer, audio_data: AudioData, model_map: ModelMap, pool: Po
     pool.apply_async(predict_word, (audio_data, model_map,))
 
 
+def extract_silence(raw_data: bytearray, percentile=75) -> Union[AudioSegment, None]:
+    # generate the WAV file contents
+    wav_io = BytesIO(raw_data)
+    segment = AudioSegment.from_wav(wav_io)
+    dbfs_list = [segment[i:i + 1].dBFS for i in range(len(segment))]
+    smoothed_dbfs_list = np.convolve(dbfs_list, np.array([1.0/10.0 for _ in range(10)])[::-1], 'same')
+    std = np.std(smoothed_dbfs_list)
+    if std < 3.5:
+        # treat as silence whole time.
+        return segment
+    threshold = np.percentile(dbfs_list, percentile)
+
+    step_size = 500
+    extract_size = 3000
+    print(f"segmentsize:{len(segment)} std:{np.std(smoothed_dbfs_list)} threshold:{threshold}")
+    for i in np.arange(0, len(segment), step_size):
+        if i + extract_size >= len(segment):
+            # silent part is not found
+            return None
+        # print(f"threadhold:{threshold} vals:{smoothed_dbfs_list[i:i+extract_size][:30]}")
+        if all([v < threshold for v in smoothed_dbfs_list[i:i+extract_size]]):
+            return segment[i:i+extract_size]
+    else:
+        # silent part is not found
+        return None
+
+
 def listen_background():
     background_listener = noisered.BackgroundListener()
-    with Microphone() as source:
+    with Microphone(sample_rate=SAMPLE_RATE) as source:
         background_listener.adjust_for_ambient_noise(source)
         while os.path.exists(SHARED_MEM_DIR):
             audio_data = background_listener.listen(source, pause_time_limit=5)
             if not audio_data:
                 time.sleep(1)
                 continue
-            try:
-                os.remove(BG_WAV_PATH)
-            except:
-                pass
 
-            # create wav file
-            with open(BG_WAV_PATH, 'wb') as f:
-                f.write(audio_data.get_wav_data())
-            # create profile with sox
-            noisered.create_noiseprof(BG_WAV_PATH, PROFILE_PATH)
+            segment = extract_silence(audio_data.get_wav_data())
+            if not segment:
+                time.sleep(1)
+                continue
+
+            with noisered.SEMAPHORE:
+                try:
+                    os.remove(BG_WAV_PATH)
+                except:
+                    pass
+                    # create wav file
+                segment.export(BG_WAV_PATH, format='wav', bitrate=256)
+                print(f"export bgm. {BG_WAV_PATH}. size={len(segment)}")
+                # with open(BG_WAV_PATH, 'wb') as f:
+                #    f.write(audio_data.get_wav_data())
 
 
 def start_listen_background():
@@ -170,8 +204,8 @@ def main():
     # start to listen background with another thread.
     start_listen_background()
 
-    while not os.path.exists(PROFILE_PATH):
-        print('ready for noise profile ...')
+    while not os.path.exists(BG_WAV_PATH):
+        print('ready for bg wav ...')
         time.sleep(1)
 
     # initialize recognizer

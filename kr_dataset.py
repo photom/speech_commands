@@ -11,18 +11,36 @@ from python_speech_features import logfbank
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import kr_keyword
+from audio_listener import SAMPLE_RATE
 
 # import pydevd
 # pydevd.settrace('localhost', port=51234, stdoutToServer=True, stderrToServer=True)
 
+# FEATURE_TYPE = 'mfcc'
+# FEATURE_TYPE = 'spectrogram'
+FEATURE_TYPE = 'lfbe'
+
+
+if FEATURE_TYPE == 'spectrogram':
+    # The number of time steps input to the model from the spectrogram
+    # Tx = 21
+    Tx = 26
+    # Number of frequencies input to the model at each time step of the spectrogram
+    n_freq = 31 * 43 * 3
+    # n_freq = 3987
+    # The number of time steps in the output of our model
+    Ty = 188
+else:
+    # The number of time steps input to the model from the spectrogram
+    Tx = 199
+    # Number of frequencies input to the model at each time step of the spectrogram
+    n_freq = 40
+    # The number of time steps in the output of our model
+    Ty = 188
+
 # sampling time
 AUDIO_DURATION = 2000
-# The number of time steps input to the model from the spectrogram
-Tx = 198
-# Number of frequencies input to the model at each time step of the spectrogram
-n_freq = 26
-# The number of time steps in the output of our model
-Ty = 188
+
 # interval
 KEYWORD_INTERVAL_MIN = 50
 KEYWORD_INTERVAL_MAX = 500
@@ -30,12 +48,10 @@ ACTIVE_AUDIO_OFFSET = 100
 # dataset ratio
 TRAIN_RATIO = 0.95
 VALIDATE_RATIO = 0.05
-WINDOW_SIZE_SAMPLE = 0.03
-WINDOW_STRIDE_SAMPLES = 0.01
+WINDOW_SIZE_SAMPLE = 0.025
+WINDOW_STRIDE_SAMPLES = 0.010
 # How much of the training data should be known words.
 KNOWN_KEYWORD_RATIO = 0.75
-
-FEATURE_TYPE = 'lfbe'
 
 
 class RawData:
@@ -104,7 +120,7 @@ class KeywordAudioData:
 def graph_spectrogram(wav_file):
     rate, data = get_wav_info(wav_file)
     nfft = 200  # Length of each window segment
-    fs = 8000  # Sampling frequencies
+    fs = SAMPLE_RATE  # Sampling frequencies
     noverlap = 120  # Overlap between windows
     nchannels = data.ndim
     if nchannels == 1:
@@ -119,16 +135,21 @@ def graph_spectrogram(wav_file):
 # Calculate spectrogram for a wav audio file
 def create_spectrogram(wav_file):
     rate, data = get_wav_info(wav_file)
-    nfft = 200  # Length of each window segment
-    fs = 8000  # Sampling frequencies
-    noverlap = 120  # Overlap between windows
+    nfft = 50  # Length of each window segment
+    fs = SAMPLE_RATE  # Sampling frequencies
+    noverlap = 15  # Overlap between windows
     nchannels = data.ndim
     if nchannels == 1:
         freqs, bins, pxx = spectrogram(data, fs, nperseg=nfft, noverlap=noverlap)
     elif nchannels == 2:
-        freqs, bins, pxx = spectrogram(data[:, 0], fs, nperseg=nfft, noverlap=noverlap)
+        freqs, bins, pxx = spectrogram(data[:, 0], fs)
     else:
         raise RuntimeError(f"invalid channels. file={wav_file}")
+    std = np.std(pxx)
+    mean = np.mean(pxx)
+    pxx = normalize(pxx, mean, std)
+    if bins.shape[0] < n_freq:
+        pxx = np.pad(pxx, ((0, 0), (0, n_freq - bins.shape[0])), 'constant', constant_values=(0, 0))
     return pxx
 
 
@@ -173,6 +194,9 @@ def create_mfcc(sample_rate, data, filename='nofile'):
     else:
         raise RuntimeError(f"invalid channels. file={filename}")
     # print(f"create_mfcc: rate:{sample_rate} data:{data.shape} features:{features.shape}")
+    std = np.std(features)
+    mean = np.mean(features)
+    features = normalize(features, mean, std)
     return features
 
 
@@ -188,14 +212,17 @@ def create_lfbe(sample_rate, data, filename='nofile'):
     nchannels = data.ndim
     # print(f"channel:{nchannels} data:{data.shape}")
     if nchannels == 1:
-        features = logfbank(data, samplerate=sample_rate,
+        features = logfbank(data, samplerate=sample_rate, nfilt=n_freq,
                             winlen=WINDOW_SIZE_SAMPLE, winstep=WINDOW_STRIDE_SAMPLES)
     elif nchannels == 2:
-        features = logfbank(data[:, 0], samplerate=sample_rate,
+        features = logfbank(data[:, 0], samplerate=sample_rate, nfilt=n_freq,
                             winlen=WINDOW_SIZE_SAMPLE, winstep=WINDOW_STRIDE_SAMPLES)
     else:
         raise RuntimeError(f"invalid channels. file={filename}")
     # print(f"create_mfcc: rate:{sample_rate} data:{data.shape} features:{features.shape}")
+    std = np.std(features)
+    mean = np.mean(features)
+    features = normalize(features, mean, std)
     return features
 
 
@@ -221,12 +248,38 @@ def create_features(filename, feature_type):
     return x
 
 
-def get_statistics(features_list):
-    features_list = np.vstack(features_list)
-    mean = np.mean(features_list, axis=0)
-    std = np.std(features_list, axis=0)
+def get_statistics(features_list, feature_type):
+    if feature_type == 'spectrogram':
+        features_list = np.hstack(features_list)
+        mean = np.mean(features_list)
+        std = np.std(features_list)
+    else:
+        features_list = np.vstack(features_list)
+        mean = np.mean(features_list)
+        std = np.std(features_list)
     print(f"get_statistics:{features_list.shape} mean:{mean.shape} std:{std.shape}")
     return mean, std
+
+
+def pad_along_axis(array: np.ndarray, target_length, axis=0):
+    """
+    :param array: padded src
+    :param target_length:
+    :param axis:
+    :return:
+
+    >>> pad_along_axis(np.array([[1, 3, 4], [3, 4, 5]]), 7, axis=1)
+    array([[1, 3, 4, 1, 1, 1, 1],
+           [3, 4, 5, 3, 3, 3, 3]])
+    """
+    pad_size = target_length - array.shape[axis]
+    axis_nb = len(array.shape)
+    if pad_size < 0:
+        return array
+    npad = [(0, 0) for x in range(axis_nb)]
+    npad[axis] = (0, pad_size)
+    b = np.pad(array, pad_width=npad, mode='minimum')
+    return b
 
 
 # Load raw audio files for speech synthesis
@@ -248,7 +301,17 @@ def load_raw_audio(feature_type):
             audio = AudioSegment.from_wav(file_path)
             keywords[keyword].append(KeywordAudioData(audio, keyword, filename))
             # get features
-            features_list.append(create_features(file_path, feature_type))
+            features = create_features(file_path, feature_type)
+            gap = features_list[0].shape[1] - features.shape[1] if len(features_list) else 0
+            before = features.shape
+            if feature_type == 'spectrogram' and gap > 0:
+                features = pad_along_axis(features, features_list[0].shape[1], axis=1)
+                # print(f"file_path: {file_path} before: {before} after: {features.shape}")
+            elif feature_type == 'spectrogram' and gap < 0:
+                features = np.resize(features, features_list[0].shape)
+                print(f"file_path: {file_path} before: {before} after: {features.shape}")
+            features_list.append(features)
+
     # background
     for filename in os.listdir(os.path.join(audio_dir_path, "_background_noise_")):
         if not filename.endswith("wav"):
@@ -261,10 +324,14 @@ def load_raw_audio(feature_type):
         for i in range(len(audio) // 1000):
             background_clipped = audio[i * 1000:i * 1000 + 1000]
             background_clipped.export('sample.wav', format="wav")
-            features_list.append(create_features('sample.wav', feature_type))
+            features = create_features('sample.wav', feature_type)
+            if feature_type == 'spectrogram' and np.array(features).shape != (101, 198):
+                print(f"file_path:{file_path}")
+                continue
+            features_list.append(features)
 
     # calc statistics
-    mean, std = get_statistics(np.array(features_list))
+    mean, std = get_statistics(np.array(features_list), feature_type)
 
     # shuffle audio list
     backgrounds = np.array(backgrounds)
@@ -286,7 +353,8 @@ def get_random_time_segment(segment_ms):
     segment_time -- a tuple of (segment_start, segment_end) in ms
     """
     # Make sure segment doesn't run past the AUDIO_DURATION sec background
-    segment_start = np.random.randint(low=0, high=AUDIO_DURATION - segment_ms)
+    # segment_start = np.random.randint(low=0, high=AUDIO_DURATION - segment_ms)
+    segment_start = 0
     segment_end = segment_start + segment_ms - 1
 
     return segment_start, segment_end
@@ -504,13 +572,14 @@ def create_training_sample(background: AudioSegment, raw_data: RawData,
 
     # Get features of the new recording (background with superposition of positive and negatives)
     x = create_features(filename, feature_type)
-    x = normalize(np.array(x), raw_data.mean, raw_data.std)
+    # normalized = normalize(np.array(x), raw_data.mean, raw_data.std)
+    # print(f"create_training_sample x:{x.shape} normalized:{normalized.shape}")
     if remove_tmpfile:
         os.remove(filename)
     return x, y
 
 
-def normalize(features, mean: np.ndarray, std: np.ndarray, eps=1e-14) -> float:
+def normalize(features, mean: np.ndarray, std: np.ndarray, eps=1e-14) -> np.ndarray:
     """ Center a feature using the mean and std
     Params:
         feature (numpy.ndarray): Feature to normalize

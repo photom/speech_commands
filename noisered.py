@@ -11,49 +11,33 @@ from speech_recognition import AudioData
 from speech_recognition import AudioSource
 from speech_recognition import Microphone
 from speech_recognition import WaitTimeoutError
+import pyaudacity
 
 SEMAPHORE = threading.Semaphore(1)
 
 
-def create_noiseprof(in_wav, profile_path, trim_start=0.5, trim_end=3):
-    try:
-        tmp_profile_path = f"{profile_path}.tmp"
+def create_noisered_wav(in_wav, out_wav, bg_wav):
+    """
 
-        # create transformer
-        tfm = sox.Transformer()
-        # trim the audio between start and end seconds.
-        tfm.trim(trim_start, trim_end)
-        tfm.noiseprof(in_wav, tmp_profile_path)
-        # create the output file.
-        tfm.build(in_wav, None)
+    :param in_wav:
+    :param out_wav:
+    :param bg_wav:
+    :return:
 
-        # move output
-        with SEMAPHORE:
+    >>> create_noisered_wav('/var/tmp/keyword_recognizer/input.wav', '/var/tmp/keyword_recognizer/noisered.wav', '/var/tmp/keyword_recognizer/bg_input.wav')
+    execute noise reduction. input=/var/tmp/keyword_recognizer/input.wav output=/var/tmp/keyword_recognizer/noisered.wav bg_wav=/var/tmp/keyword_recognizer/bg_input.wav
+
+    1: »0⋅1/1⋅1/1⋅1/1
+    """
+    with SEMAPHORE:
+        result = pyaudacity.noisered(bg_wav, 0, 0.5, in_wav, 12, 6, 3, out_wav + ".tmp")
+        if result:
             try:
-                os.remove(profile_path)
+                os.remove(out_wav)
             except:
                 pass
-            os.rename(tmp_profile_path, profile_path)
-    except:
-        traceback.print_exc()
-        raise
-
-    # see the applied effects
-    print(f"created profile. input={in_wav} profile={profile_path} {tfm.effects_log}")
-
-
-def create_noisered_wav(in_wav, out_wav, profile_path, amount=0.05):
-    with SEMAPHORE:
-        # create transformer
-        tfm = sox.Transformer()
-        # trim the audio between start and end seconds.
-        tfm.noisered(profile_path, amount=amount)
-        # gain
-        # tfm.gain(1)
-        # create the output file.
-        tfm.build(in_wav, out_wav)
-        # see the applied effects
-        print(f"execute noise reduction. input={in_wav} output={out_wav} profile={profile_path} {tfm.effects_log}")
+            os.rename(out_wav + ".tmp", out_wav)
+            print(f"execute noise reduction. input={in_wav} output={out_wav} bg_wav={bg_wav}")
 
 
 class BackgroundListener(Recognizer):
