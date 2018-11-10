@@ -30,14 +30,24 @@ def create_noisered_wav(in_wav, out_wav, bg_wav):
     1: »0⋅1/1⋅1/1⋅1/1
     """
     with SEMAPHORE:
-        result = pyaudacity.noisered(bg_wav, 0, 0.5, in_wav, 12, 6, 3, out_wav + ".tmp")
+        result = pyaudacity.noisered(bg_wav, 0, 0.5, in_wav, 12, 6, 3, out_wav + '.tmp1')
+        if not os.path.exists(out_wav + '.tmp1'):
+            print(f"{out_wav + '.tmp1'} does not exists")
+            return False
+        if not result:
+            return False
+        result = pyaudacity.noisered(out_wav + '.tmp1', 0, 0.25, out_wav + '.tmp1', 12, 6, 3, out_wav + '.tmp2')
+        if not os.path.exists(out_wav + '.tmp2'):
+            print(f"{out_wav + '.tmp2'} does not exists")
+            return False
         if result:
             try:
                 os.remove(out_wav)
             except:
                 pass
-            os.rename(out_wav + ".tmp", out_wav)
+            os.rename(out_wav + ".tmp2", out_wav)
             print(f"execute noise reduction. input={in_wav} output={out_wav} bg_wav={bg_wav}")
+            return True
 
 
 class BackgroundListener(Recognizer):

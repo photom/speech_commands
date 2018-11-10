@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from td_utils_ctc import *
+from src.td_utils_ctc import *
 
 import pickle
 from keras.models import Model
@@ -8,10 +8,8 @@ from keras.layers import Dense, Activation, Dropout, TimeDistributed, Conv1D
 from keras.layers import GRU, Bidirectional, BatchNormalization
 from keras.optimizers import Adam
 from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from tensorflow import set_random_seed
 from keras.layers import (Input, Lambda)
 from keras import backend as keras_backend
-from keras import metrics
 
 
 def cnn_output_length(input_length, filter_size, border_mode, stride=1,

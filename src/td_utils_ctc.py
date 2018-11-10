@@ -8,7 +8,7 @@ import pickle
 from scipy.signal import spectrogram
 from python_speech_features import mfcc
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-import char_map
+from src import char_map
 
 # import pydevd
 # pydevd.settrace('localhost', port=51234, stdoutToServer=True, stderrToServer=True)

@@ -1,5 +1,7 @@
 import os
 import pickle
+import sys
+import pathlib
 
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
@@ -8,10 +10,11 @@ import numpy as np
 from scipy.signal import spectrogram
 from python_speech_features import mfcc
 from python_speech_features import logfbank
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+# import mpl_toolkits # import before pathlib
 
-import kr_keyword
+sys.path.append(pathlib.Path(__file__).parent)
 from audio_listener import SAMPLE_RATE
+import command
 
 # import pydevd
 # pydevd.settrace('localhost', port=51234, stdoutToServer=True, stderrToServer=True)
@@ -20,6 +23,8 @@ from audio_listener import SAMPLE_RATE
 # FEATURE_TYPE = 'spectrogram'
 FEATURE_TYPE = 'lfbe'
 
+# sampling time
+AUDIO_DURATION = 5000
 
 if FEATURE_TYPE == 'spectrogram':
     # The number of time steps input to the model from the spectrogram
@@ -32,14 +37,11 @@ if FEATURE_TYPE == 'spectrogram':
     Ty = 188
 else:
     # The number of time steps input to the model from the spectrogram
-    Tx = 199
+    Tx = 499
     # Number of frequencies input to the model at each time step of the spectrogram
     n_freq = 40
     # The number of time steps in the output of our model
-    Ty = 188
-
-# sampling time
-AUDIO_DURATION = 2000
+    Ty = 499
 
 # interval
 KEYWORD_INTERVAL_MIN = 50
@@ -64,10 +66,10 @@ class RawData:
 
     @staticmethod
     def get_known_keywords():
-        return list(kr_keyword.KNOWN_KEYWORDS.keys())
+        return list(command.KNOWN_KEYWORDS.keys())
 
     def get_unknown_keywords(self):
-        return list(set(self.keywords.keys()) - set(kr_keyword.KNOWN_KEYWORDS.keys()))
+        return list(set(self.keywords.keys()) - set(command.KNOWN_KEYWORDS.keys()))
 
 
 class KeywordAudioData:
@@ -90,7 +92,7 @@ class KeywordAudioData:
             if self.audio[i:i+1].dBFS >= threshold:
                 values.append(self.value)
             else:
-                values.append(kr_keyword.SILENCE_KEYWORD_IDX)
+                values.append(command.SILENCE_KEYWORD_IDX)
         # print(self.keyword)
         # for i in range(len(self.audio)):
         #    print(f"{i}: {values[i]}")
@@ -107,13 +109,13 @@ class KeywordAudioData:
         return first_idx, last_idx
 
     def get_keyword_index(self):
-        if self.keyword in kr_keyword.KNOWN_KEYWORDS:
+        if self.keyword in command.KNOWN_KEYWORDS:
             # target word
             # decrement index offset
-            return kr_keyword.KNOWN_KEYWORDS[self.keyword]
+            return command.KNOWN_KEYWORDS[self.keyword]
         else:
             # unknown
-            return kr_keyword.UNKNOWN_KEYWORD_IDX
+            return command.UNKNOWN_KEYWORD_IDX
 
 
 # Calculate and plot spectrogram for a wav audio file
@@ -161,7 +163,7 @@ def plot_mfcc_feature(vis_mfcc_feature):
     plt.title('Normalized MFCC')
     plt.ylabel('Time')
     plt.xlabel('MFCC Coefficient')
-    divider = make_axes_locatable(ax)
+    divider = mpl_toolkits.axes_grid1.make_axes_locatable(ax)
     cax = divider.append_axes("right", size="5%", pad=0.05)
     plt.colorbar(im, cax=cax)
     ax.set_xticks(np.arange(0, 13, 2), minor=False)
@@ -409,7 +411,7 @@ def calc_slide_size(segment_time, previous_segment):
         return 0
 
 
-def insert_ones(y: np.ndarray, segment_start_ms: int, audio: KeywordAudioData):
+def insert_ones(y: np.ndarray, segment_start_ms: int, audio: KeywordAudioData, set_unknown: bool = False):
     """
     Update the label vector y during segment.
 
@@ -417,27 +419,30 @@ def insert_ones(y: np.ndarray, segment_start_ms: int, audio: KeywordAudioData):
     y -- numpy array of shape (1, Ty), the labels of the training example
     segment_start_ms -- the start time of the segment in ms
     audio -- target keyword audio
-    truncated -- whether the keyword is truncated
+    set_unknown -- whether suppress to unknown
 
     Returns:
     y -- updated labels
     """
     # default keyword index
-    value = audio.value
+    if set_unknown:
+        value = command.UNKNOWN_KEYWORD_IDX
+    else:
+        value = audio.value
 
     segment_start_y = int((segment_start_ms + audio.start_ms) * Ty / float(AUDIO_DURATION))
     if segment_start_y < 0:
         # truncate exceeding range
         segment_start_y = 0
         # consider truncated word as invalid
-        value = kr_keyword.UNKNOWN_KEYWORD_IDX
+        value = command.UNKNOWN_KEYWORD_IDX
         # print("set unknown idx")
     segment_end_y = int((segment_start_ms + audio.end_ms) * Ty / float(AUDIO_DURATION))
     if segment_end_y > Ty:
         # truncate exceeding range
         segment_end_y = Ty
         # consider truncated word as invalid
-        value = kr_keyword.UNKNOWN_KEYWORD_IDX
+        value = command.UNKNOWN_KEYWORD_IDX
         # print("set unknown idx")
 
     # print(f"keyword:{audio.keyword} file:{audio.filename} start:{audio.start_ms} end:{audio.end_ms} segstart:{segment_start_ms} segend:{segment_end_ms} segstart_y:{segment_start_y} segend_y:{segment_end_y}")
@@ -450,15 +455,16 @@ def insert_ones(y: np.ndarray, segment_start_ms: int, audio: KeywordAudioData):
 
 
 def insert_audio_clip(tmp_audio: AudioSegment, y: np.ndarray,
-                      keyword_audio: KeywordAudioData, previous_segment: tuple):
+                      keyword_audio: KeywordAudioData, previous_segment: tuple, set_unknown: bool = False):
     """
     Insert a new audio segment over the background noise at a random time step, ensuring that the
     audio segment does not overlap with existing segments.
 
     Arguments:
     tmp_audio -- a 10 second background audio recording.
-    audio_clip -- the audio clip to be inserted/overlaid.
+    keyword_audio -- the audio clip to be inserted/overlaid.
     previous_segment -- time where audio segment haa already been placed
+    set_unknown -- whether suppress to unknown
 
     Returns:
     new_background -- the updated background audio
@@ -485,7 +491,7 @@ def insert_audio_clip(tmp_audio: AudioSegment, y: np.ndarray,
         return tmp_audio, y, segment_time
 
     # set y value
-    y = insert_ones(y, segment_time[0], keyword_audio)
+    y = insert_ones(y, segment_time[0], keyword_audio, set_unknown)
 
     # Superpose audio segment and background
     overlaid_audio = keyword_audio.audio
@@ -533,21 +539,44 @@ def create_training_sample(background: AudioSegment, raw_data: RawData,
     # number_of_keywords = np.random.randint(0, 5)
     # number_of_keywords = np.random.choice([0, 1, 1, 2, 2, 3, 3, 3, 4, 4])
     # 0: 10%, 1: 50%, 2: 40%
-    # number_of_keywords = np.random.choice([0, 1, 1, 1, 1, 1, 2, 2, 2, 2])
-    number_of_keywords = np.random.choice([0, 1, 1, 1, 1, 1, 1])
+    number_of_keywords = np.random.choice([0, 1, 1, 2, 2, 2, 2, 2, 2, 2])
+    # number_of_keywords = np.random.choice([0, 1, 1, 1, 1, 1, 1])
     random_keywords = []
+    words = []
     for i in range(number_of_keywords):
         if np.random.rand() < KNOWN_KEYWORD_RATIO:
             idx = np.random.randint(len(RawData.get_known_keywords()))
-            keyword = RawData.get_known_keywords()[idx]
+            word = RawData.get_known_keywords()[idx]
         else:
             idx = np.random.randint(len(raw_data.get_unknown_keywords()))
-            keyword = raw_data.get_unknown_keywords()[idx]
-        random_keywords.append((keyword, raw_data.keywords[keyword]))
+            word = raw_data.get_unknown_keywords()[idx]
+        words.append(word)
+        # random_keywords.append((word, raw_data.keywords[word]))
+
+    # create source info
+    if len(words) == 1:
+        word = words[0]
+        sample_audio = raw_data.keywords[word][0]
+        if (word, ) in command.COMMANDS:
+            random_keywords.append((word, raw_data.keywords[word], sample_audio.value))
+        else:
+            random_keywords.append((word, raw_data.keywords[word], command.UNKNOWN_KEYWORD_IDX))
+    elif len(words) == 2:
+        if tuple(words) in command.COMMANDS:
+            for word in words:
+                sample_audio = raw_data.keywords[word][0]
+                random_keywords.append((word, raw_data.keywords[word], sample_audio.value))
+        else:
+            for word in words:
+                sample_audio = raw_data.keywords[word][0]
+                if (word,) in command.COMMANDS:
+                    random_keywords.append((word, raw_data.keywords[word], sample_audio.value))
+                else:
+                    random_keywords.append((word, raw_data.keywords[word], command.UNKNOWN_KEYWORD_IDX))
 
     # print(f"num:{number_of_keywords}")
     # Loop over randomly selected "activate" clips and insert in background
-    for keyword, random_keyword_list in random_keywords:
+    for word, random_keyword_list, value in random_keywords:
         # print(f"idx:{idx}")
         sample_num = len(random_keyword_list)
         train_num = int(sample_num * TRAIN_RATIO)
@@ -559,8 +588,9 @@ def create_training_sample(background: AudioSegment, raw_data: RawData,
         keyword_audio = random_keyword_list[random_index]
 
         # Insert the audio clip on the background
-        tmp_audio, y, previous_segment = insert_audio_clip(tmp_audio, y, keyword_audio, previous_segment)
-        # print(f"keyword:{keyword} range:{previous_segment} audio_file:{keyword_audio.filename} audio_range:{(keyword_audio.start_ms, keyword_audio.end_ms)}")
+        tmp_audio, y, previous_segment = insert_audio_clip(tmp_audio, y, keyword_audio, previous_segment,
+                                                           value == command.UNKNOWN_KEYWORD_IDX)
+        # print(f"keyword:{word} range:{previous_segment} audio_file:{keyword_audio.filename} audio_range:{(keyword_audio.start_ms, keyword_audio.end_ms)}")
         # print(f"create_training_sample1 y:{y[701:]}")
         # Standardize the volume of the audio clip
         tmp_audio = match_target_amplitude(tmp_audio, -20.0)

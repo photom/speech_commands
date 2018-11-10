@@ -1,10 +1,14 @@
 import string
 import random
+import sys
+import pickle
+import pathlib
 
-from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from tensorflow import set_random_seed
+from keras.models import Model
+from keras.callbacks import EarlyStopping, ModelCheckpoint
 
-from kr_model import *
+sys.path.append(pathlib.Path(__file__).parent)
+from dataset import *
 
 
 def create_callbacks(name_weights, patience_lr=10, patience_es=10):
@@ -24,7 +28,7 @@ def load_dataset(filename):
 
 
 def next_dataset(raw_data: RawData, batch_size: int,
-                 is_train: bool = True, feature_type=FEATURE_TYPE):
+                 is_train: bool = True, detect_wakeword: bool = False, feature_type=FEATURE_TYPE):
     """ Obtain a batch of training data
     """
     while True:
@@ -43,11 +47,12 @@ def next_dataset(raw_data: RawData, batch_size: int,
                                           feature_type=feature_type)
             # x, y = create_training_sample(clipped_background, raw_data, is_train=is_train)
 
-            y = np.delete(y, np.where(y == [0.0]), axis=0)
-            if not len(y):
-                y = [0.0]
-            else:
-                y = y[0]
+            if detect_wakeword:
+                y = np.delete(y, np.where(y == [0.0]), axis=0)
+                if not len(y):
+                    y = [0.0]
+                else:
+                    y = y[0]
             # print(y)
             train_dataset_x.append(x)
             train_dataset_y.append(y)
@@ -61,21 +66,17 @@ def train_model(model: Model, raw_data: RawData, model_filename,
                 batch_size=100,
                 num_train_examples=50000,
                 num_valid_samples=2500,
-                epochs=15):
+                epochs=15,
+                detect_wakeword=False):
     callbacks = create_callbacks(model_filename)
     steps_per_epoch = num_train_examples//batch_size
     validation_steps = num_valid_samples//batch_size
     # model.fit(x, y, validation_split=0.3, batch_size=batch_size, epochs=10, callbacks=callbacks)
-    model.fit_generator(generator=next_dataset(raw_data, batch_size, is_train=True, feature_type=feature_type),
+    model.fit_generator(generator=next_dataset(raw_data, batch_size, is_train=True,
+                                               detect_wakeword=detect_wakeword, feature_type=feature_type),
                         epochs=epochs,
-                        validation_data=next_dataset(raw_data, batch_size, is_train=False, feature_type=feature_type),
+                        validation_data=next_dataset(raw_data, batch_size, is_train=False,
+                                                     detect_wakeword=detect_wakeword, feature_type=feature_type),
                         steps_per_epoch=steps_per_epoch,
                         validation_steps=validation_steps,
                         callbacks=callbacks, verbose=True)
-
-
-def build_and_train(raw_data, model_filename, create_model=create_model_dilation):
-    model = build_model(model_filename, learning_rate=0.009, create_model=create_model)
-    train_model(model, raw_data, model_filename,
-                num_train_examples=10000,
-                num_valid_samples=500)

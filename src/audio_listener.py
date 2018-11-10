@@ -1,34 +1,33 @@
 #!/usr/bin/env python
 
-import os
 import sys
+import os
+import pathlib
 import time
-import random
-import string
 import shutil
 from functools import partial
 from multiprocessing.dummy import Pool
 import threading
 from io import BytesIO
 import traceback
-from collections import Counter
 from timeit import default_timer as timer
 from typing import Union
 
-from pydub import AudioSegment
 import numpy as np
 from speech_recognition import Microphone
 from speech_recognition import Recognizer
 from speech_recognition import AudioData
-from keras.models import Model
 
-from kr_model import *
+sys.path.append(pathlib.Path(__file__).parent)
+from dataset import *
+import command
+
 import noisered
-
 
 SAMPLE_RATE = 16000
 PHRASE_TIME_LIMIT = 2
-MODEL_WEIGHT_PATH = 'model/kmn_dilation_lbfe.weights.best.hdf5'
+MODEL_WEIGHT_PATH = 'model/kmn_cnn2_lfbe.weights.best.hdf5'
+
 
 THREAD_NUM = 1
 # SHARED_MEM_DIR = f"/dev/shm/keyword_recognizer_{''.join(random.choices(string.ascii_uppercase + string.digits, k=10))}"
@@ -68,15 +67,16 @@ def remove_shared_mem_dir(dir_name=SHARED_MEM_DIR):
 
 
 def load_model():
-    model = create_model_dilation(input_shape=(Tx, n_freq), is_train=False)
-    model.load_weights('model/kmn_dilation2.weights.best.hdf5')
+    import single_word_model
+    model = single_word_model.create_model_cnn2(input_shape=(Tx, n_freq), is_train=False)
+    model.load_weights(MODEL_WEIGHT_PATH)
     model.summary()
     return model
 
 
 def summarize_prediction(predicted):
-    decoded = [np.argmax(predicted[idx], axis=0) for idx, key_idx in enumerate(predicted)]
-    print(dict(Counter(decoded)))
+    decoded = np.argmax(predicted)
+    print(decoded)
 
 
 def predict_word(audio_data: AudioData, model_map: ModelMap):
@@ -90,9 +90,16 @@ def predict_word(audio_data: AudioData, model_map: ModelMap):
             pass
 
         # execute noise reduction
-        with open(INPUT_WAV_PATH, 'wb') as f:
+        with open(INPUT_WAV_PATH + '.tmp', 'wb') as f:
             f.write(audio_data.get_wav_data())
-        noisered.create_noisered_wav(INPUT_WAV_PATH, NOISERED_WAV_PATH, BG_WAV_PATH)
+        with noisered.SEMAPHORE:
+            try:
+                os.remove(INPUT_WAV_PATH)
+            except:
+                pass
+            os.rename(INPUT_WAV_PATH + '.tmp', INPUT_WAV_PATH)
+        if not noisered.create_noisered_wav(INPUT_WAV_PATH, NOISERED_WAV_PATH, BG_WAV_PATH):
+            return
 
         # load or get model
         if threading.get_ident() not in model_map.models:
@@ -130,7 +137,7 @@ def predict_word(audio_data: AudioData, model_map: ModelMap):
         start = timer()
         predicted = model.predict(x)
         end = timer()
-        print(f"predicted: {end - start}")
+        print(f"predicted:{predicted} time:{end - start}")
         summarize_prediction(predicted[0])
     except:
         traceback.print_exc()
@@ -150,12 +157,13 @@ def extract_silence(raw_data: bytearray, percentile=75) -> Union[AudioSegment, N
     std = np.std(smoothed_dbfs_list)
     if std < 3.5:
         # treat as silence whole time.
+        print("background listener: treat as silence whole range")
         return segment
     threshold = np.percentile(dbfs_list, percentile)
 
     step_size = 500
     extract_size = 3000
-    print(f"segmentsize:{len(segment)} std:{np.std(smoothed_dbfs_list)} threshold:{threshold}")
+    print(f"background listener: segment_size:{len(segment)} std:{np.std(smoothed_dbfs_list)} threshold:{threshold}")
     for i in np.arange(0, len(segment), step_size):
         if i + extract_size >= len(segment):
             # silent part is not found
@@ -175,13 +183,16 @@ def listen_background():
         while os.path.exists(SHARED_MEM_DIR):
             audio_data = background_listener.listen(source, pause_time_limit=5)
             if not audio_data:
+                print("background listener: no audio data")
                 time.sleep(1)
                 continue
 
             segment = extract_silence(audio_data.get_wav_data())
             if not segment:
+                print("background listener: no silence")
                 time.sleep(1)
                 continue
+            segment.export(BG_WAV_PATH + '.tmp', format='wav', bitrate=256)
 
             with noisered.SEMAPHORE:
                 try:
@@ -189,7 +200,7 @@ def listen_background():
                 except:
                     pass
                     # create wav file
-                segment.export(BG_WAV_PATH, format='wav', bitrate=256)
+                os.rename(BG_WAV_PATH + '.tmp', BG_WAV_PATH)
                 print(f"export bgm. {BG_WAV_PATH}. size={len(segment)}")
                 # with open(BG_WAV_PATH, 'wb') as f:
                 #    f.write(audio_data.get_wav_data())

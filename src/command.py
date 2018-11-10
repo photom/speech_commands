@@ -6,11 +6,12 @@ KNOWN_KEYWORDS = {
 #    'unknown': 1,  # others
     'on': 2,
     'off': 3,
-    'stop': 4,
-    'one': 5,
-    'two': 6,
-    'three': 7,
+    'one': 4,
+    'two': 5,
+    'three': 6,
+    'marvin': 7,
     'sheila': 8,
+#    'stop': 4,
 #    'yes': 6,
 #    'no': 7,
 #    'up': 2,
@@ -35,6 +36,17 @@ KNOWN_KEYWORDS = {
 #    'marvin': 29,
 #    'wow': 31,
 }
+
+COMMANDS = [
+    ('marvin', ),
+    ('sheila', ),
+    ('one', 'on'),
+    ('one', 'off'),
+    ('two', 'on'),
+    ('two', 'off'),
+    ('three', 'on'),
+    ('three', 'on'),
+]
 
 # KEYWORDS (exclude silence)
 NUM_CLASSES = len(KNOWN_KEYWORDS) + 2

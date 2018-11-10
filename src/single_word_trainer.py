@@ -1,11 +1,14 @@
 #!/usr/bin/env python
 
-from kr_model import *
-from train_model import *
-from kr_dataset import *
+import sys
+from pathlib import Path
+
 from tensorflow import set_random_seed
 
-import pickle
+sys.path.append(Path(__file__).parent)
+from train_model import *
+from single_word_model import *
+from dataset import *
 
 np.random.seed(19)
 set_random_seed(19)
@@ -27,7 +30,7 @@ print("keywords[0] len: " + str(len(raw_data.keywords['on'][0].audio)))
 print("keywords[1] len: " + str(len(raw_data.keywords['off'][0].audio)))
 # print(f"mean:{raw_data.mean.shape} std:{raw_data.std.shape}")
 
-weight_param_path = f"model/kmn_cnn2_{FEATURE_TYPE}.weights.best.hdf5"
+weight_param_path = f"model/kmn_cnnbidirect_{FEATURE_TYPE}.weights.best.hdf5"
 # model_dilation
 model = build_model(weight_param_path, create_model=create_model_cnn2)
 model.summary()
@@ -38,4 +41,5 @@ set_random_seed(19)
 for i in range(0, 4):
     print(f"num:{i}")
     train_model(model, raw_data, weight_param_path,
+                detect_wakeword=False,
                 feature_type=FEATURE_TYPE)
