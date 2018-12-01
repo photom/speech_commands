@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import mpl_toolkits # import before pathlib
+
 import sys
 import os
 import pathlib
@@ -12,13 +14,14 @@ from io import BytesIO
 import traceback
 from timeit import default_timer as timer
 from typing import Union
+from collections import Counter
 
 import numpy as np
 from speech_recognition import Microphone
 from speech_recognition import Recognizer
 from speech_recognition import AudioData
 
-sys.path.append(pathlib.Path(__file__).parent)
+# sys.path.append(pathlib.Path(__file__).parent)
 from dataset import *
 import command
 
@@ -26,8 +29,8 @@ import noisered
 
 SAMPLE_RATE = 16000
 PHRASE_TIME_LIMIT = 2
-MODEL_WEIGHT_PATH = 'model/kmn_cnn2_lfbe.weights.best.hdf5'
-
+# MODEL_WEIGHT_PATH = 'model/kmn_cnn2_lfbe.weights.best.hdf5'
+MODEL_WEIGHT_PATH = 'model/kmn_cnnbidirect_lfbe.weights.best.hdf5'
 
 THREAD_NUM = 1
 # SHARED_MEM_DIR = f"/dev/shm/keyword_recognizer_{''.join(random.choices(string.ascii_uppercase + string.digits, k=10))}"
@@ -67,15 +70,18 @@ def remove_shared_mem_dir(dir_name=SHARED_MEM_DIR):
 
 
 def load_model():
-    import single_word_model
-    model = single_word_model.create_model_cnn2(input_shape=(Tx, n_freq), is_train=False)
+    # import single_word_model
+    # model = single_word_model.create_model_cnn2(input_shape=(Tx, n_freq), is_train=False)
+    import multi_words_model
+    model = multi_words_model.create_model_cnn_bidirect(input_shape=(Tx, n_freq), is_train=False)
     model.load_weights(MODEL_WEIGHT_PATH)
     model.summary()
     return model
 
 
 def summarize_prediction(predicted):
-    decoded = np.argmax(predicted)
+    # decoded = np.argmax(predicted)
+    decoded = Counter([np.argmax(p) for p in predicted])
     print(decoded)
 
 

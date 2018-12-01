@@ -12,7 +12,7 @@ from python_speech_features import mfcc
 from python_speech_features import logfbank
 # import mpl_toolkits # import before pathlib
 
-sys.path.append(pathlib.Path(__file__).parent)
+# sys.path.append(pathlib.Path(__file__).parent)
 from audio_listener import SAMPLE_RATE
 import command
 
@@ -24,7 +24,7 @@ import command
 FEATURE_TYPE = 'lfbe'
 
 # sampling time
-AUDIO_DURATION = 5000
+AUDIO_DURATION = 1000
 
 if FEATURE_TYPE == 'spectrogram':
     # The number of time steps input to the model from the spectrogram
@@ -37,32 +37,31 @@ if FEATURE_TYPE == 'spectrogram':
     Ty = 188
 else:
     # The number of time steps input to the model from the spectrogram
-    Tx = 499
+    Tx = 99
     # Number of frequencies input to the model at each time step of the spectrogram
     n_freq = 40
     # The number of time steps in the output of our model
-    Ty = 499
+    Ty = 248
 
 # interval
 KEYWORD_INTERVAL_MIN = 50
 KEYWORD_INTERVAL_MAX = 500
 ACTIVE_AUDIO_OFFSET = 100
 # dataset ratio
-TRAIN_RATIO = 0.95
-VALIDATE_RATIO = 0.05
+TRAIN_RATIO = 0.90
+VALIDATE_RATIO = 0.10
 WINDOW_SIZE_SAMPLE = 0.025
 WINDOW_STRIDE_SAMPLES = 0.010
 # How much of the training data should be known words.
-KNOWN_KEYWORD_RATIO = 0.75
+KNOWN_KEYWORD_RATIO = 0.70
+# WORD_NUM_RATIO = [0, 1, 1, 2, 2, 2, 2, 2, 2, 2]
+WORD_NUM_RATIO = [0, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 
 
 class RawData:
-    def __init__(self, keywords: dict, backgrounds: np.ndarray,
-                 mean: np.ndarray, std: np.ndarray):
+    def __init__(self, keywords: dict, backgrounds: np.ndarray):
         self.keywords = keywords
         self.backgrounds = backgrounds
-        self.mean = mean
-        self.std = std
 
     @staticmethod
     def get_known_keywords():
@@ -332,16 +331,13 @@ def load_raw_audio(feature_type):
                 continue
             features_list.append(features)
 
-    # calc statistics
-    mean, std = get_statistics(np.array(features_list), feature_type)
-
     # shuffle audio list
     backgrounds = np.array(backgrounds)
     np.random.shuffle(backgrounds)
     for keyword in keywords.keys():
         keywords[keyword] = np.array(keywords[keyword])
         np.random.shuffle(keywords[keyword])
-    return RawData(keywords, backgrounds, mean, std)
+    return RawData(keywords, backgrounds)
 
 
 def get_random_time_segment(segment_ms):
@@ -511,6 +507,60 @@ def insert_audio_clip(tmp_audio: AudioSegment, y: np.ndarray,
     return tmp_audio, y, segment_time
 
 
+def generate_words(raw_data: RawData):
+    # Select command randomly,
+    if np.random.rand() < 0.35:
+        # return list(np.random.choice(list(command.COMMANDS)))
+        # print(list(command.KNOWN_KEYWORDS.keys()))
+        return [np.random.choice(list(command.KNOWN_KEYWORDS.keys()))]
+
+    # or select 0-2 random "activate" audio clips from the entire list of "activates" recordings
+    # number_of_keywords = np.random.randint(0, 5)
+    # number_of_keywords = np.random.choice([0, 1, 1, 2, 2, 3, 3, 3, 4, 4])
+    # 0: 10%, 1: 50%, 2: 40%
+    number_of_keywords = np.random.choice(WORD_NUM_RATIO)
+    words = []
+    for i in range(number_of_keywords):
+        if np.random.rand() < KNOWN_KEYWORD_RATIO:
+            idx = np.random.randint(len(RawData.get_known_keywords()))
+            word = RawData.get_known_keywords()[idx]
+        else:
+            idx = np.random.randint(len(raw_data.get_unknown_keywords()))
+            word = raw_data.get_unknown_keywords()[idx]
+        words.append(word)
+    return words
+
+
+def create_source_info(words: list, raw_data: RawData):
+    """
+    ready to gather input audio info
+    :param words: input keyword
+    :param raw_data: structured audio data
+    :return: (keyword, audio data, id of keyword)
+    """
+    random_keywords = []
+    if len(words) == 1:
+        word = words[0]
+        sample_audio = raw_data.keywords[word][0]
+        if (word, ) in command.COMMANDS:
+            random_keywords.append((word, raw_data.keywords[word], sample_audio.value))
+        else:
+            random_keywords.append((word, raw_data.keywords[word], command.UNKNOWN_KEYWORD_IDX))
+    elif len(words) == 2:
+        if tuple(words) in command.COMMANDS:
+            for word in words:
+                sample_audio = raw_data.keywords[word][0]
+                random_keywords.append((word, raw_data.keywords[word], sample_audio.value))
+        else:
+            for word in words:
+                sample_audio = raw_data.keywords[word][0]
+                if (word,) in command.COMMANDS:
+                    random_keywords.append((word, raw_data.keywords[word], sample_audio.value))
+                else:
+                    random_keywords.append((word, raw_data.keywords[word], command.UNKNOWN_KEYWORD_IDX))
+    return random_keywords
+
+
 def create_training_sample(background: AudioSegment, raw_data: RawData,
                            feature_type: str = FEATURE_TYPE,
                            is_train: bool = True,
@@ -535,44 +585,8 @@ def create_training_sample(background: AudioSegment, raw_data: RawData,
     # Initialize segment times as empty list
     previous_segment = None
 
-    # Select 0-2 random "activate" audio clips from the entire list of "activates" recordings
-    # number_of_keywords = np.random.randint(0, 5)
-    # number_of_keywords = np.random.choice([0, 1, 1, 2, 2, 3, 3, 3, 4, 4])
-    # 0: 10%, 1: 50%, 2: 40%
-    number_of_keywords = np.random.choice([0, 1, 1, 2, 2, 2, 2, 2, 2, 2])
-    # number_of_keywords = np.random.choice([0, 1, 1, 1, 1, 1, 1])
-    random_keywords = []
-    words = []
-    for i in range(number_of_keywords):
-        if np.random.rand() < KNOWN_KEYWORD_RATIO:
-            idx = np.random.randint(len(RawData.get_known_keywords()))
-            word = RawData.get_known_keywords()[idx]
-        else:
-            idx = np.random.randint(len(raw_data.get_unknown_keywords()))
-            word = raw_data.get_unknown_keywords()[idx]
-        words.append(word)
-        # random_keywords.append((word, raw_data.keywords[word]))
-
-    # create source info
-    if len(words) == 1:
-        word = words[0]
-        sample_audio = raw_data.keywords[word][0]
-        if (word, ) in command.COMMANDS:
-            random_keywords.append((word, raw_data.keywords[word], sample_audio.value))
-        else:
-            random_keywords.append((word, raw_data.keywords[word], command.UNKNOWN_KEYWORD_IDX))
-    elif len(words) == 2:
-        if tuple(words) in command.COMMANDS:
-            for word in words:
-                sample_audio = raw_data.keywords[word][0]
-                random_keywords.append((word, raw_data.keywords[word], sample_audio.value))
-        else:
-            for word in words:
-                sample_audio = raw_data.keywords[word][0]
-                if (word,) in command.COMMANDS:
-                    random_keywords.append((word, raw_data.keywords[word], sample_audio.value))
-                else:
-                    random_keywords.append((word, raw_data.keywords[word], command.UNKNOWN_KEYWORD_IDX))
+    words = generate_words(raw_data)
+    random_keywords = create_source_info(words, raw_data)
 
     # print(f"num:{number_of_keywords}")
     # Loop over randomly selected "activate" clips and insert in background

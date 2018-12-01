@@ -1,6 +1,3 @@
-import sys
-import pathlib
-
 from keras import backend as K
 from keras.models import Model
 from keras.layers import Dense, Activation, Dropout, TimeDistributed, \
@@ -11,7 +8,6 @@ from keras.layers import Reshape
 from keras.optimizers import Adam
 from keras import backend as keras_backend
 
-sys.path.append(pathlib.Path(__file__).parent)
 from dataset import *
 import command
 
@@ -38,6 +34,7 @@ def add_ctc_loss(input_to_softmax):
         inputs=[input_to_softmax.input, the_labels, input_lengths, label_lengths],
         outputs=loss_out)
     return model
+
 
 def cnn_output_length(input_length, filter_size, border_mode, stride,
                       dilation=1):
@@ -166,7 +163,7 @@ def create_model_cnn_bidirect(input_shape, class_num=command.NUM_CLASSES,
     """
     Function creating the model's graph in Keras.
     loss: 0.1503 - acc: 0.9493 - val_loss: 0.1244 - val_acc: 0.9575
-
+    loss: 0.1600 - acc: 0.9455 - val_loss: 0.1258 - val_acc: 0.9560
     Argument:
     input_shape -- shape of the model's input data (using Keras conventions)
     Returns:
@@ -175,8 +172,54 @@ def create_model_cnn_bidirect(input_shape, class_num=command.NUM_CLASSES,
     x_input = Input(name='the_input', shape=input_shape)
     x = x_input
     # CONV layer
-    # x = Conv1D(filters=filters, kernel_size=(kernel_size,), padding='same', dilation_rate=4)(x)
-    # x = BatchNormalization()(x)
+    x = Conv1D(filters=filters, kernel_size=(5,), padding='same')(x)
+    x = BatchNormalization()(x)
+    x = ELU(alpha=0.05)(x)
+    x = MaxPooling1D(pool_size=(5,), strides=(2,))(x)
+    # if is_train:
+    #    x = Dropout(dropout)(x)
+
+    for i in range(2):
+        x = Bidirectional(GRU(units=units,
+                              return_sequences=True,
+                              dropout=dropout,
+                              recurrent_dropout=recurrent_dropout,
+                              implementation=1))(x)
+        x = BatchNormalization()(x)
+
+    # Time-distributed dense layer
+    x = TimeDistributed(Dense(class_num, activation='softmax'))(x)
+
+    model = Model(inputs=x_input, outputs=x)
+    model.output_length = lambda v: cnn_output_length(v, kernel_size, 'causal',
+                                                      stride=2, dilation=2)
+    return model
+
+
+def create_model_cnn_bidirect_ctc(input_shape, class_num=command.NUM_CLASSES,
+                                  units=200, filters=196, kernel_size=11,
+                                  dropout=0.5, recurrent_dropout=0.1,
+                                  is_train=True):
+    model = create_model_cnn_bidirect(input_shape, class_num, units, filters, kernel_size, dropout, recurrent_dropout,
+                                      is_train)
+    return add_ctc_loss(model)
+
+
+def create_model_bidirect(input_shape, class_num=command.NUM_CLASSES,
+                          units=200, filters=196, kernel_size=11,
+                          dropout=0.5, recurrent_dropout=0.1,
+                          is_train=True):
+    """
+    Function creating the model's graph in Keras.
+    loss: 0.1721 - acc: 0.9437 - val_loss: 0.1576 - val_acc: 0.9452
+
+    Argument:
+    input_shape -- shape of the model's input data (using Keras conventions)
+    Returns:
+    model -- Keras model instance
+    """
+    x_input = Input(name='the_input', shape=input_shape)
+    x = x_input
 
     for i in range(2):
         x = Bidirectional(GRU(units=units,

@@ -4,13 +4,16 @@ UNKNOWN_KEYWORD_IDX = 1
 KNOWN_KEYWORDS = {
 #    'silence': 0,
 #    'unknown': 1,  # others
-    'on': 2,
-    'off': 3,
-    'one': 4,
-    'two': 5,
-    'three': 6,
-    'marvin': 7,
-    'sheila': 8,
+    'yes': 2,
+    'no': 3,
+    'up': 4,
+    'down': 5,
+    'left': 6,
+    'right': 7,
+    'on': 8,
+    'off': 9,
+    'stop': 10,
+    'go': 11,
 #    'stop': 4,
 #    'yes': 6,
 #    'no': 7,
@@ -37,16 +40,33 @@ KNOWN_KEYWORDS = {
 #    'wow': 31,
 }
 
+REVERSE_KEYWORDS_MAP = {v: k for k, v in KNOWN_KEYWORDS.items()}
+REVERSE_KEYWORDS_MAP[0] = 'silence'
+REVERSE_KEYWORDS_MAP[1] = 'unknown'
+
 COMMANDS = [
-    ('marvin', ),
-    ('sheila', ),
-    ('one', 'on'),
-    ('one', 'off'),
-    ('two', 'on'),
-    ('two', 'off'),
-    ('three', 'on'),
-    ('three', 'on'),
+    ('yes',),
+    ('no',),
+    ('up',),
+    ('down',),
+    ('left',),
+    ('right',),
+    ('on',),
+    ('off',),
+    ('stop',),
+    ('go',),
 ]
+
+# COMMANDS = [
+#     ('marvin', ),
+#     ('sheila', ),
+#     ('one', 'on'),
+#     ('one', 'off'),
+#     ('two', 'on'),
+#     ('two', 'off'),
+#     ('three', 'on'),
+#     ('three', 'on'),
+# ]
 
 # KEYWORDS (exclude silence)
 NUM_CLASSES = len(KNOWN_KEYWORDS) + 2

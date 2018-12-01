@@ -222,7 +222,7 @@ def insert_audio_clip(background, audio_clip, previous_segments):
     return new_background, segment_time
 
 
-def create_training_sample(background, keywords, filename='sample.wav', feature='mfcc',
+def create_training_sample(background, keywords, filename='sample.wav', feature_type='mfcc',
                            is_train=True):
     """
     Creates a training example with a given background, activates, and negatives.
@@ -283,10 +283,7 @@ def create_training_sample(background, keywords, filename='sample.wav', feature=
     # print(f"File ({filename}) was saved in your directory.")
 
     # Get features of the new recording (background with superposition of positive and negatives)
-    if feature == 'mfcc':
-        x = create_mfcc(filename)
-    else:
-        x = create_spectrogram(filename)
+    x = create_features(filename, feature_type)
 
     keyword_times = sorted(list(y_words.keys()))
     if len(y_words.keys()) == 0:

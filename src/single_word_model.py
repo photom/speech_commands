@@ -1,5 +1,5 @@
 import sys
-from pathlib import Path
+import pathlib
 
 from keras import backend as K
 from keras.models import Model
@@ -10,7 +10,7 @@ from keras.layers import Input, ELU
 from keras.layers import Reshape
 from keras.optimizers import Adam
 
-sys.path.append(Path(__file__).parent)
+sys.path.append(pathlib.Path(__file__).parent)
 from dataset import *
 import command
 
@@ -48,8 +48,8 @@ def cnn_output_length(input_length, filter_size, border_mode, stride,
     return (output_length + stride - 1) // stride
 
 
-def create_model_cnn(input_shape, class_num=command.NUM_CLASSES,
-                     dropout=0.5):
+def create_model_cnn0(input_shape, class_num=command.NUM_CLASSES,
+                      dropout=0.5):
     """
     https://arxiv.org/pdf/1803.03759.pdf
     Function creating the model's graph in Keras.
@@ -91,8 +91,8 @@ def create_model_cnn(input_shape, class_num=command.NUM_CLASSES,
     return model
 
 
-def create_model_cnn2(input_shape, class_num=command.NUM_CLASSES,
-                      dropout=0.5, is_train=True):
+def create_model_cnn(input_shape, class_num=command.NUM_CLASSES,
+                     dropout=0.55, is_train=True):
     """
     https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/43969.pdf
     Function creating the model's graph in Keras.
@@ -112,7 +112,7 @@ def create_model_cnn2(input_shape, class_num=command.NUM_CLASSES,
     x_input = Input(name='the_input', shape=input_shape)
     x = Reshape((Tx, 40))(x_input)
     # CONV layer
-    x = Conv1D(filters=32, kernel_size=(5,), padding='same')(x)
+    x = Conv1D(filters=32, kernel_size=(10,), padding='same')(x)
     x = BatchNormalization()(x)
     x = ELU(alpha=0.05)(x)
     x = MaxPooling1D(pool_size=(5,), strides=(2,))(x)
@@ -127,13 +127,13 @@ def create_model_cnn2(input_shape, class_num=command.NUM_CLASSES,
         x = Conv1D(filters=128, kernel_size=(5,), padding='same')(x)
         x = BatchNormalization()(x)
         x = ELU(alpha=0.05)(x)
-        x = MaxPooling1D(pool_size=(3,), strides=(1,))(x)
+        x = MaxPooling1D(pool_size=(3,), strides=(2,))(x)
 
     for i in range(1):
-        x = Conv1D(filters=196, kernel_size=(3,), padding='same')(x)
+        x = Conv1D(filters=256, kernel_size=(3,), padding='same')(x)
         x = BatchNormalization()(x)
         x = ELU(alpha=0.05)(x)
-        x = MaxPooling1D(pool_size=(2,), strides=(1,))(x)
+        x = MaxPooling1D(pool_size=(2,), strides=(2,))(x)
 
     # Batch normalization added right before the ReLu activation
     x = Dense(1024, activation=elu)(x)
@@ -142,13 +142,13 @@ def create_model_cnn2(input_shape, class_num=command.NUM_CLASSES,
     x = Flatten()(x)
     x = Dense(class_num, activation='softmax')(x)
     model = Model(inputs=x_input, outputs=x)
-    model.output_length = lambda v: cnn_output_length(v, filter_size=128, border_mode='causal',
-                                                      stride=1, dilation=2)
+    # model.output_length = lambda v: cnn_output_length(v, filter_size=196, border_mode='causal',
+    #                                                   stride=1, dilation=2)
     return model
 
 
 def build_model(model_filename, learning_rate=0.001,
-                create_model=create_model_cnn2,
+                create_model=create_model_cnn,
                 input_shape=(Tx, n_freq)):
     print(f"input shape={(Tx, n_freq)}")
     model = create_model(input_shape=(Tx, n_freq), class_num=command.NUM_CLASSES)

@@ -7,7 +7,7 @@ import pathlib
 from keras.models import Model
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 
-sys.path.append(pathlib.Path(__file__).parent)
+# sys.path.append(pathlib.Path(__file__).parent)
 from dataset import *
 
 

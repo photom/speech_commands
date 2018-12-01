@@ -6,7 +6,7 @@ import pathlib
 
 from tensorflow import set_random_seed
 
-sys.path.append(pathlib.Path(__file__).parent)
+# sys.path.append(pathlib.Path(__file__).parent)
 from train_model import *
 from multi_words_model import *
 from dataset import *
@@ -31,7 +31,7 @@ print("keywords[0] len: " + str(len(raw_data.keywords['on'][0].audio)))
 print("keywords[1] len: " + str(len(raw_data.keywords['off'][0].audio)))
 # print(f"mean:{raw_data.mean.shape} std:{raw_data.std.shape}")
 
-weight_param_path = f"model/kmn_cnnbidirect_{FEATURE_TYPE}.weights.best.hdf5"
+weight_param_path = f"model/kmn_cnnbidirectctc_{FEATURE_TYPE}.weights.best.hdf5"
 # model_dilation
 model = build_model(weight_param_path, create_model=create_model_cnn_bidirect)
 model.summary()
